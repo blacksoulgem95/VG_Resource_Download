@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------------------
+# Ambiente Python/launcher (generati automaticamente, non versionare)
+# ---------------------------------------------------------------------------
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Copia locale di tkinter preparata da download.sh (senza sudo)
+.tk-bundle/
+
+# Profilo Chrome persistente: contiene il cookie cf_clearance e cache del
+# browser, quindi dati locali e potenzialmente sensibili
+.chrome-profile/
+
+# ---------------------------------------------------------------------------
+# File scaricati
+#
+# Le cartelle con gli asset sono dati, non codice: qui sono elencate quelle
+# già scaricate. Se ne usi altre, aggiungile (oppure lancia i download fuori
+# da questa cartella con -o).
+# ---------------------------------------------------------------------------
+Kingdom_Hearts_II/
+Disney_Solitaire/
+
+# Download parziali
+*.part
+
+# ---------------------------------------------------------------------------
+# Sistema operativo / editor
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.idea/
+.vscode/
