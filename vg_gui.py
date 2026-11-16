@@ -156,7 +156,7 @@ class App(tk.Tk):
         self.browse_btn.grid(row=0, column=1, padx=(8, 0))
         ttk.Label(
             root,
-            text="Lascia vuoto per creare una cartella con il titolo del gioco.",
+            text="Lascia vuoto per usare download/<Gioco>, con una sottocartella per sezione.",
             style="Muted.TLabel",
         ).grid(row=7, column=0, sticky="w", pady=(0, 14))
 

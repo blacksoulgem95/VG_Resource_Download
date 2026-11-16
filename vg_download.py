@@ -19,12 +19,17 @@ Launcher inclusi:
     download.bat           Windows
 
 Opzioni principali:
-    -o, --out DIR      cartella di destinazione (default: nome del gioco)
+    -o, --out DIR      cartella di destinazione (default: download/<Gioco>)
+    --flat             senza sottocartelle per sezione (tutto nella stessa cartella)
     --delay SECONDI    pausa tra un download e l'altro (default 0.5)
     --force            riscarica anche i file già presenti
     --profile DIR      profilo Chrome persistente (default .chrome-profile)
     --headless         prova senza finestra (di solito Cloudflare blocca)
     --limit N          scarica solo i primi N asset (utile per provare)
+
+Gli asset sono raggruppati in sottocartelle che riprendono le sezioni della
+pagina (es. download/Kingdom_Hearts_II/Sora/). Passando -o la cartella indicata
+vale come cartella del gioco; con --flat si torna alla struttura piatta.
 """
 
 from __future__ import annotations
@@ -68,6 +73,9 @@ IMG_RE = re.compile(r'<img[^>]*src="([^"]+)"')
 SECTION_RE = re.compile(r'<span class="asset-count">\[\d+\]</span>\s*([^<]+)')
 ICON_PATH_RE = re.compile(r"/media/asset_icons/(\d+)/(\d+)\.png")
 ASSET_HREF_RE = re.compile(r"/(?:[^/]+)/(?:[^/]+)/asset/(\d+)/")
+
+# Cartella creata quando non se ne indica una: download/<Gioco>/<Sezione>/
+DEFAULT_DOWNLOAD_DIR = "download"
 
 
 def log(msg: str = "") -> None:
@@ -274,6 +282,15 @@ def folder_name(title: str) -> str:
     return cleaned or "VG_Resource_Download"
 
 
+def section_folder(section: str) -> str:
+    """Nome di cartella per una sezione della pagina; vuoto se non c'è sezione."""
+    section = (section or "").strip()
+    if not section:
+        return ""
+    cleaned = safe_name(section, max_len=60)
+    return "" if not cleaned or cleaned == "asset" else cleaned
+
+
 def download_zip(ctx, zip_url: str, dest: Path, referer: str) -> tuple[bool, str]:
     try:
         response = ctx.request.get(
@@ -312,6 +329,7 @@ def run_download(
     limit: int = 0,
     profile: str = ".chrome-profile",
     headless: bool = False,
+    flat: bool = False,
     on_line=None,
     on_progress=None,
     on_out_dir=None,
@@ -380,31 +398,45 @@ def run_download(
             if limit and limit > 0:
                 assets = assets[:limit]
 
-            out_dir = Path(os.path.expanduser(out)) if out else Path(folder_name(game_title))
+            out_dir = Path(os.path.expanduser(out)) if out else Path(
+                DEFAULT_DOWNLOAD_DIR
+            ) / folder_name(game_title)
             out_dir.mkdir(parents=True, exist_ok=True)
             if on_out_dir is not None:
                 on_out_dir(str(out_dir.resolve()))
 
+            sections = {a["section"] for a in assets if a["section"]}
             emit(f"Gioco: {game_title}")
-            emit(f"Asset trovati: {len(assets)} -> {out_dir.resolve()}")
+            detail = f" in {len(sections)} sezioni" if sections and not flat else ""
+            emit(f"Asset trovati: {len(assets)}{detail} -> {out_dir.resolve()}")
             if on_progress is not None:
                 on_progress(0, len(assets), game_title, "start")
             emit()
 
             width = len(str(len(assets)))
-            used_names: dict[str, int] = {}
+            used_names: dict[tuple[str, str], int] = {}
             failures: list[tuple[str, str]] = []
             skipped = 0
+            last_section = None
 
             for index, asset in enumerate(assets, start=1):
                 label = asset["name"]
+                # Sezioni della pagina -> sottocartelle (es. Sora/, Goofy/).
+                section = "" if flat else section_folder(asset["section"])
+                target_dir = out_dir / section if section else out_dir
+
                 stem = safe_name(label)
-                if stem in used_names:
-                    used_names[stem] += 1
+                key = (str(target_dir), stem)
+                if key in used_names:
+                    used_names[key] += 1
                     stem = f"{stem} [{asset['id']}]"
                 else:
-                    used_names[stem] = 1
-                dest = out_dir / f"{stem}.zip"
+                    used_names[key] = 1
+                dest = target_dir / f"{stem}.zip"
+
+                if section and section != last_section:
+                    last_section = section
+                    emit(f"-- {section} --")
 
                 prefix = f"[{index:>{width}}/{len(assets)}]"
                 name = label if len(label) <= 34 else label[:31] + "..."
@@ -413,6 +445,8 @@ def run_download(
                     emit(f"{prefix} {name:<34}  salto (già presente)",
                          (index, len(assets), label, "skip"))
                     continue
+
+                target_dir.mkdir(parents=True, exist_ok=True)
 
                 zip_url = urljoin(base, asset["zip_path"]) if asset["zip_path"] else ""
                 asset_url = urljoin(base, asset["page_path"])
@@ -485,6 +519,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile", default=".chrome-profile", help="profilo Chrome")
     parser.add_argument("--headless", action="store_true", help="avvia Chrome senza finestra")
     parser.add_argument("--limit", type=int, default=0, help="scarica solo i primi N asset")
+    parser.add_argument(
+        "--flat",
+        action="store_true",
+        help="senza sottocartelle per sezione (tutti gli zip insieme)",
+    )
     return parser
 
 
@@ -499,6 +538,7 @@ def main(argv: list[str]) -> int:
         limit=args.limit,
         profile=args.profile,
         headless=args.headless,
+        flat=args.flat,
     )
 
 

@@ -16,12 +16,16 @@ __pycache__/
 # ---------------------------------------------------------------------------
 # File scaricati
 #
-# Le cartelle con gli asset sono dati, non codice: qui sono elencate quelle
-# già scaricate. Se ne usi altre, aggiungile (oppure lancia i download fuori
-# da questa cartella con -o).
+# La destinazione predefinita è download/<Gioco>/<Sezione>/. Le cartelle con
+# gli asset sono dati, non codice.
 # ---------------------------------------------------------------------------
+download/
+
+# Cartelle di download fatte in passato nella radice del progetto
+# (vecchio comportamento, prima di download/ e delle sottocartelle per sezione)
 Kingdom_Hearts_II/
 Disney_Solitaire/
+Fallout_New_Vegas/
 
 # Download parziali
 *.part

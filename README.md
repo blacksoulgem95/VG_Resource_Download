@@ -56,10 +56,11 @@ Se preferisci installarla a livello di sistema (consigliato, più pulito):
 ## Riga di comando
 
 ```bash
-python vg_download.py <url> [-o CARTELLA] [--delay 0.5] [--force] [--limit N]
+python vg_download.py <url> [-o CARTELLA] [--flat] [--delay 0.5] [--force] [--limit N]
 ```
 
-- `-o, --out` cartella di destinazione (default: nome del gioco)
+- `-o, --out` cartella del gioco (default: `download/<Gioco>`)
+- `--flat` mette tutti gli zip in un'unica cartella, senza sottocartelle per sezione
 - `--delay` pausa in secondi tra un file e l'altro (default `0.5`)
 - `--force` riscarica anche i file già presenti
 - `--limit` scarica solo i primi N asset (utile per provare)
@@ -68,6 +69,27 @@ python vg_download.py <url> [-o CARTELLA] [--delay 0.5] [--force] [--limit N]
 
 Si può incollare anche l'URL di un singolo asset: viene ricondotto alla pagina
 del gioco.
+
+## Dove finiscono i file
+
+Se non scegli una cartella la destinazione è `download/<Gioco>/`, con una
+sottocartella per ogni sezione della pagina del gioco:
+
+```
+download/
+└── Kingdom_Hearts_II/
+    ├── Sora/
+    │   ├── Sora (Anti Form).zip
+    │   └── Sora (Final).zip
+    ├── Goofy/
+    │   └── Goofy.zip
+    └── Characters/
+        └── ...
+```
+
+Specificando `-o` (o scegliendo la cartella nella GUI o nella TUI) quella
+diventa la cartella del gioco e le sottocartelle per sezione restano. Con
+`--flat` si ottiene invece la vecchia struttura piatta.
 
 ## File
 

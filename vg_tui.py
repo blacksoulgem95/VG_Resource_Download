@@ -325,7 +325,7 @@ def _field_line(app: App, index: int, width: int) -> str:
     placeholder = (
         "https://models.spriters-resource.com/..."
         if index == FIELD_URL
-        else "(vuoto = nome del gioco)"
+        else "(vuoto = download/<Gioco>/<Sezione>)"
     )
 
     avail = max(1, width - 4)
@@ -377,7 +377,7 @@ def render(app: App) -> str:
 
     lines.append(row(Style.bold() + "Cartella di destinazione" + Style.reset()))
     lines.append(row(_field_line(app, FIELD_DEST, inner - 1)))
-    lines.append(row(Style.dim() + "  lascia vuoto per creare la cartella dal titolo" + Style.reset()))
+    lines.append(row(Style.dim() + "  vuoto = download/<Gioco>, sottocartelle per sezione" + Style.reset()))
     lines.append(row())
 
     box = "[x]" if app.overwrite else "[ ]"
@@ -494,7 +494,7 @@ def ask_plain(url: str, dest: str, overwrite: bool) -> dict | None:
             return None
     if not dest:
         try:
-            dest = input("Cartella di destinazione (vuoto = automatica): ").strip()
+            dest = input("Cartella di destinazione (vuoto = download/<Gioco>): ").strip()
         except EOFError:
             dest = ""
     if not url:
@@ -555,7 +555,7 @@ def main(argv: list[str]) -> int:
     if answers["dest"]:
         print(f"Destinazione: {os.path.expanduser(answers['dest'])}")
     else:
-        print("Destinazione: cartella automatica (nome del gioco)")
+        print("Destinazione: automatica (download/<Gioco>, sottocartelle per sezione)")
     print("Sovrascrivi esistenti:", "sì" if answers["overwrite"] else "no")
     print()
 
