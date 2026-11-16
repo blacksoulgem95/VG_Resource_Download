@@ -21,12 +21,6 @@ __pycache__/
 # ---------------------------------------------------------------------------
 download/
 
-# Cartelle di download fatte in passato nella radice del progetto
-# (vecchio comportamento, prima di download/ e delle sottocartelle per sezione)
-Kingdom_Hearts_II/
-Disney_Solitaire/
-Fallout_New_Vegas/
-
 # Download parziali
 *.part
 
