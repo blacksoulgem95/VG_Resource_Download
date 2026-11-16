@@ -21,6 +21,14 @@ import sys
 import unicodedata
 
 from vg_download import normalize_game_url, run_download
+from vg_i18n import (
+    apply_language_arg,
+    current_language,
+    language_name,
+    next_language,
+    set_language,
+    t,
+)
 
 TITLE = "VG Resource Download"
 
@@ -256,7 +264,8 @@ def keyboard():
 
 # ------------------------------------------------------------------- stato ---
 
-FIELD_URL, FIELD_DEST, FIELD_FORCE, FIELD_START = range(4)
+FIELD_URL, FIELD_DEST, FIELD_FORCE, FIELD_LANG, FIELD_START = range(5)
+FIELD_COUNT = 5
 
 
 class App:
@@ -266,6 +275,7 @@ class App:
         self.overwrite = bool(overwrite)
         self.focus = FIELD_URL if not self.values[0] else FIELD_DEST
         self.error = ""
+        self.lang = current_language()
         self.frame = FRAME_ASCII if os.name == "nt" else FRAME_UNICODE
 
     # --- editing -------------------------------------------------------
@@ -300,6 +310,10 @@ class App:
     def cursor_end(self) -> None:
         self.cursor[self.focus] = len(self.values[self.focus])
 
+    def cycle_language(self, step: int = 1) -> None:
+        """Passa alla lingua successiva/precedente e la ricorda per la prossima volta."""
+        self.lang = set_language(next_language(self.lang, step), persist=True)
+
     # --- risultato -----------------------------------------------------
     def result(self) -> dict:
         return {
@@ -323,9 +337,9 @@ def _field_line(app: App, index: int, width: int) -> str:
     value = app.values[index]
     cursor = app.cursor[index]
     placeholder = (
-        "https://models.spriters-resource.com/..."
+        t("tui.placeholder_url")
         if index == FIELD_URL
-        else "(vuoto = download/<Gioco>/<Sezione>)"
+        else t("tui.placeholder_dest")
     )
 
     avail = max(1, width - 4)
@@ -370,32 +384,41 @@ def render(app: App) -> str:
     )
 
     lines.append(row())
-    lines.append(row(Style.bold() + "Link della pagina del gioco" + Style.reset()))
+    lines.append(row(Style.bold() + t("tui.url_label") + Style.reset()))
     lines.append(row(_field_line(app, FIELD_URL, inner - 1)))
-    lines.append(row(Style.dim() + "  incolla l'URL della pagina del gioco" + Style.reset()))
+    lines.append(row(Style.dim() + t("tui.url_hint") + Style.reset()))
     lines.append(row())
 
-    lines.append(row(Style.bold() + "Cartella di destinazione" + Style.reset()))
+    lines.append(row(Style.bold() + t("tui.dest_label") + Style.reset()))
     lines.append(row(_field_line(app, FIELD_DEST, inner - 1)))
-    lines.append(row(Style.dim() + "  vuoto = download/<Gioco>, sottocartelle per sezione" + Style.reset()))
+    lines.append(row(Style.dim() + t("tui.dest_hint") + Style.reset()))
     lines.append(row())
 
+    label = t("tui.overwrite")
     box = "[x]" if app.overwrite else "[ ]"
     checked = (
-        Style.bold() + box + Style.reset() + " Sovrascrivi i file già scaricati"
+        Style.bold() + box + Style.reset() + " " + label
         if app.overwrite
-        else Style.dim() + box + Style.reset() + Style.dim() + " Sovrascrivi i file già scaricati" + Style.reset()
+        else Style.dim() + box + Style.reset() + Style.dim() + " " + label + Style.reset()
     )
     if app.focus == FIELD_FORCE:
-        checked = Style.invert() + f" {box} Sovrascrivi i file già scaricati " + Style.reset()
+        checked = Style.invert() + f" {box} {label} " + Style.reset()
     lines.append(row("  " + checked))
+
+    lang_text = f"  {t('tui.lang_label')}: {language_name(app.lang)}"
+    if app.focus == FIELD_LANG:
+        if Style.enabled:
+            lang_text += "  (Invio per cambiare)" if app.lang == "it" else "  (< >)"
+        lines.append(row(Style.invert() + lang_text + Style.reset()))
+    else:
+        lines.append(row(Style.dim() + lang_text + Style.reset()))
     lines.append(row())
 
-    button = "[ Avvia download ]"
+    label = t("tui.start")
     if app.focus == FIELD_START:
-        button = Style.invert() + Style.bold() + "  Avvia download  " + Style.reset()
+        button = Style.invert() + Style.bold() + f"  {label}  " + Style.reset()
     else:
-        button = Style.cyan() + Style.bold() + button + Style.reset()
+        button = Style.cyan() + Style.bold() + f"[ {label} ]" + Style.reset()
     lines.append(row("  " + button))
 
     if app.error:
@@ -403,7 +426,7 @@ def render(app: App) -> str:
     else:
         lines.append(row())
 
-    hint = "Tab/frecce: sposta   Invio: avvia   Esc: esci"
+    hint = t("tui.hint")
     lines.append(row(Style.dim() + "  " + hint + Style.reset()))
     lines.append(frame["bl"] + frame["h"] * inner + frame["br"])
 
@@ -440,11 +463,14 @@ def tui(url: str = "", dest: str = "", overwrite: bool = False) -> dict | None:
                     if value == " " and app.focus == FIELD_FORCE:
                         app.overwrite = not app.overwrite
                         continue
+                    if value == " " and app.focus == FIELD_LANG:
+                        app.cycle_language(1)
+                        continue
                     if value in (" ", "\t") and app.focus == FIELD_START:
                         app.error = ""
                         if app.values[FIELD_URL].strip():
                             return app.result()
-                        app.error = "Inserisci prima l'URL della pagina del gioco."
+                        app.error = t("tui.err_need_url")
                         app.focus = FIELD_URL
                         continue
                     if app.focus in (FIELD_URL, FIELD_DEST):
@@ -455,18 +481,25 @@ def tui(url: str = "", dest: str = "", overwrite: bool = False) -> dict | None:
                 if value == CTRL_C or value == ESC:
                     return None
                 if value in (TAB, DOWN):
-                    app.focus = (app.focus + 1) % 4
+                    app.focus = (app.focus + 1) % FIELD_COUNT
                 elif value in (BACKTAB, UP):
-                    app.focus = (app.focus - 1) % 4
+                    app.focus = (app.focus - 1) % FIELD_COUNT
                 elif value == ENTER:
                     app.error = ""
                     if app.focus == FIELD_FORCE:
                         app.overwrite = not app.overwrite
+                    elif app.focus == FIELD_LANG:
+                        app.cycle_language(1)
                     elif not app.values[FIELD_URL].strip():
-                        app.error = "Inserisci l'URL della pagina del gioco."
+                        app.error = t("tui.err_need_url2")
                         app.focus = FIELD_URL
                     else:
                         return app.result()
+                elif app.focus == FIELD_LANG:
+                    if value == LEFT:
+                        app.cycle_language(-1)
+                    elif value == RIGHT:
+                        app.cycle_language(1)
                 elif app.focus in (FIELD_URL, FIELD_DEST):
                     if value == LEFT:
                         app.move_cursor(-1)
@@ -489,23 +522,24 @@ def ask_plain(url: str, dest: str, overwrite: bool) -> dict | None:
     print(f"== {TITLE} ==")
     if not url:
         try:
-            url = input("Link della pagina del gioco: ").strip()
+            url = input(t("tui.plain_url")).strip()
         except EOFError:
             return None
     if not dest:
         try:
-            dest = input("Cartella di destinazione (vuoto = download/<Gioco>): ").strip()
+            dest = input(t("tui.plain_dest")).strip()
         except EOFError:
             dest = ""
     if not url:
-        print("Errore: nessun URL inserito.")
+        print(t("tui.plain_no_url"))
         return None
     if not overwrite:
         try:
-            answer = input("Sovrascrivere i file già presenti? [s/N] ").strip().lower()
+            answer = input(t("tui.plain_overwrite")).strip().lower()
         except EOFError:
             answer = ""
-        overwrite = answer.startswith("s")
+        # 's' in italiano, 'y' in inglese, 'o' in francese
+        overwrite = bool(answer) and answer.startswith(t("tui.yes")[:1])
     return {"url": url, "dest": dest, "overwrite": overwrite}
 
 
@@ -514,7 +548,8 @@ def main(argv: list[str]) -> int:
     dest = ""
     overwrite = False
 
-    args = list(argv)
+    # --lang va tolto prima: il resto del parsing è scritto a mano.
+    args = apply_language_arg(list(argv))
     index = 0
     while index < len(args):
         arg = args[index]
@@ -539,24 +574,25 @@ def main(argv: list[str]) -> int:
     answers = tui(url, dest, overwrite) if interactive else ask_plain(url, dest, overwrite)
     if not answers:
         clear_screen()
-        print("Annullato.")
+        print(t("tui.cancelled"))
         return 130
 
     try:
         target = normalize_game_url(answers["url"])
     except SystemExit:
-        print("Errore: URL non valido.")
+        print(t("tui.invalid_url"))
         return 1
 
     if interactive:
         clear_screen()
     print(f"== {TITLE} ==")
-    print(f"Gioco: {target}")
+    print(t("tui.game", value=target))
     if answers["dest"]:
-        print(f"Destinazione: {os.path.expanduser(answers['dest'])}")
+        print(t("tui.dest", value=os.path.expanduser(answers["dest"])))
     else:
-        print("Destinazione: automatica (download/<Gioco>, sottocartelle per sezione)")
-    print("Sovrascrivi esistenti:", "sì" if answers["overwrite"] else "no")
+        print(t("tui.dest_auto"))
+    print(t("tui.overwrite_state",
+            value=t("tui.yes") if answers["overwrite"] else t("tui.no")))
     print()
 
     code = run_download(
@@ -568,7 +604,7 @@ def main(argv: list[str]) -> int:
     if interactive and os.environ.get("VG_PAUSE", "1") != "0":
         print()
         try:
-            input("Premi Invio per chiudere...")
+            input(t("tui.press_enter"))
         except EOFError:
             pass
     return code

@@ -44,6 +44,8 @@ from html import unescape as unescape_html
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
+from vg_i18n import LANG_CODES, set_language, t
+
 CHALLENGE_MARKERS = (
     "just a moment",
     "attention required",
@@ -139,7 +141,7 @@ def find_chrome() -> str | None:
 def normalize_game_url(raw: str) -> str:
     raw = raw.strip()
     if not raw:
-        raise SystemExit("Errore: nessun URL inserito.")
+        raise SystemExit(t("err.no_url"))
     if not raw.startswith(("http://", "https://")):
         raw = "https://" + raw
     parts = urlsplit(raw)
@@ -168,7 +170,7 @@ def fetch_html(page, url: str, label: str, attempts: int = 4, wait: int = 90):
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
         except Exception as exc:  # navigazione interrotta dal reload del challenge
-            log(f"   [{label}] navigazione: {exc.__class__.__name__}, riprovo...")
+            log(t("log.nav_retry", label=label, exc=exc.__class__.__name__))
 
         deadline = time.time() + wait
         while time.time() < deadline:
@@ -186,14 +188,10 @@ def fetch_html(page, url: str, label: str, attempts: int = 4, wait: int = 90):
                     page.wait_for_timeout(500)
             break
 
-        log(f"   [{label}] tentativo {attempt}/{attempts}: Cloudflare non ancora superato")
+        log(t("log.cf_attempt", label=label, attempt=attempt, attempts=attempts))
         time.sleep(2 + attempt)
 
-    raise RuntimeError(
-        "Cloudflare non ha lasciato passare la pagina.\n"
-        "Suggerimenti: riprova tra qualche minuto, oppure apri il sito a mano\n"
-        "nel Chrome che si è appena aperto (a volte serve un clic sul check)."
-    )
+    raise RuntimeError(t("err.cloudflare"))
 
 
 def extract_title(html: str) -> str:
@@ -299,14 +297,14 @@ def download_zip(ctx, zip_url: str, dest: Path, referer: str) -> tuple[bool, str
             timeout=180000,
         )
     except Exception as exc:
-        return False, f"errore di rete ({exc.__class__.__name__})"
+        return False, t("err.network", exc=exc.__class__.__name__)
 
     if response.status != 200:
         return False, f"HTTP {response.status}"
 
     body = response.body()
     if not body:
-        return False, "risposta vuota"
+        return False, t("err.empty")
 
     tmp = dest.with_name(dest.name + ".part")
     tmp.write_bytes(body)
@@ -374,8 +372,8 @@ def run_download(
         try:
             ctx = pw.chromium.launch_persistent_context(profile, **launch_opts)
         except Exception as exc:
-            emit(f"Avvio Chrome non riuscito ({exc}).")
-            emit("Installa Google Chrome oppure imposta VG_CHROME=/percorso/chrome")
+            emit(t("err.chrome_launch", exc=exc))
+            emit(t("err.chrome_hint"))
             return 1
 
         ctx.add_init_script(
@@ -384,15 +382,15 @@ def run_download(
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
 
         try:
-            emit("Apro la pagina del gioco (se compare una finestra Chrome, non chiuderla)...")
-            title, html = fetch_html(page, game_url, "gioco")
+            emit(t("log.opening"))
+            title, html = fetch_html(page, game_url, t("label.game"))
             assets = extract_assets(html)
             game_title = extract_title(html) or (
                 title.split(" - ")[0].strip() or "VG_Resource_Download"
             )
 
             if not assets:
-                emit(f"ERRORE: nessun asset trovato (HTML {len(html)} caratteri).")
+                emit(t("err.no_assets", size=len(html)))
                 return 1
 
             if limit and limit > 0:
@@ -406,9 +404,12 @@ def run_download(
                 on_out_dir(str(out_dir.resolve()))
 
             sections = {a["section"] for a in assets if a["section"]}
-            emit(f"Gioco: {game_title}")
-            detail = f" in {len(sections)} sezioni" if sections and not flat else ""
-            emit(f"Asset trovati: {len(assets)}{detail} -> {out_dir.resolve()}")
+            emit(t("log.game", title=game_title))
+            if sections and not flat:
+                emit(t("log.found_sections", count=len(assets),
+                       sections=len(sections), dir=out_dir.resolve()))
+            else:
+                emit(t("log.found", count=len(assets), dir=out_dir.resolve()))
             if on_progress is not None:
                 on_progress(0, len(assets), game_title, "start")
             emit()
@@ -442,7 +443,7 @@ def run_download(
                 name = label if len(label) <= 34 else label[:31] + "..."
                 if dest.exists() and dest.stat().st_size > 0 and not force:
                     skipped += 1
-                    emit(f"{prefix} {name:<34}  salto (già presente)",
+                    emit(f"{prefix} {name:<34}  {t('log.skip')}",
                          (index, len(assets), label, "skip"))
                     continue
 
@@ -451,16 +452,17 @@ def run_download(
                 zip_url = urljoin(base, asset["zip_path"]) if asset["zip_path"] else ""
                 asset_url = urljoin(base, asset["page_path"])
 
-                ok, info = (False, "nessun link .zip nella pagina del gioco")
+                ok, info = (False, t("err.no_zip"))
                 for attempt in range(1, 3):
                     if zip_url:
                         ok, info = download_zip(ctx, zip_url, dest, game_url)
                     if ok:
                         break
-                    emit(f"{prefix} {name:<34}  tentativo {attempt} fallito ({info})")
+                    emit(f"{prefix} {name:<34}  "
+                         + t("log.attempt_failed", attempt=attempt, info=info))
                     # Il cookie di Cloudflare può essere scaduto: lo rinfresco.
                     try:
-                        fetch_html(page, game_url, "refresh")
+                        fetch_html(page, game_url, t("label.refresh"))
                     except Exception:
                         pass
                     if not zip_url:
@@ -471,10 +473,10 @@ def run_download(
                     time.sleep(2)
 
                 if ok:
-                    emit(f"{prefix} {name:<34}  OK  {info}",
+                    emit(f"{prefix} {name:<34}  {t('log.ok')}  {info}",
                          (index, len(assets), label, "ok"))
                 else:
-                    emit(f"{prefix} {name:<34}  FALLITO ({info})",
+                    emit(f"{prefix} {name:<34}  {t('log.failed')} ({info})",
                          (index, len(assets), label, "fail"))
                     failures.append((label, info))
 
@@ -483,23 +485,21 @@ def run_download(
 
             emit()
             done = len(assets) - len(failures) - skipped
-            emit(
-                f"Completato: {done} scaricati, {skipped} già presenti, "
-                f"{len(failures)} falliti su {len(assets)} asset."
-            )
-            emit(f"Cartella: {out_dir.resolve()}")
+            emit(t("log.summary", done=done, skipped=skipped,
+                   failed=len(failures), total=len(assets)))
+            emit(t("log.folder", dir=out_dir.resolve()))
             if failures:
-                emit(f"Non scaricati ({len(failures)}):")
+                emit(t("log.failures", count=len(failures)))
                 for label, reason in failures:
-                    emit(f"  - {label}: {reason}")
+                    emit(t("log.failure_line", label=label, reason=reason))
                 return 2
             return 0
 
         except RuntimeError as exc:
-            emit(f"ERRORE: {exc}")
+            emit(t("err.generic", exc=exc))
             return 1
         except KeyboardInterrupt:
-            emit("Interrotto dall'utente.")
+            emit(t("log.interrupted"))
             return 130
         finally:
             try:
@@ -509,36 +509,59 @@ def run_download(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Scarica gli asset di un gioco da The Models Resource."
-    )
-    parser.add_argument("url", nargs="?", help="URL della pagina del gioco")
-    parser.add_argument("-o", "--out", help="cartella di destinazione")
-    parser.add_argument("--delay", type=float, default=0.5, help="pausa tra i download (s)")
-    parser.add_argument("--force", action="store_true", help="riscarica file esistenti")
-    parser.add_argument("--profile", default=".chrome-profile", help="profilo Chrome")
-    parser.add_argument("--headless", action="store_true", help="avvia Chrome senza finestra")
-    parser.add_argument("--limit", type=int, default=0, help="scarica solo i primi N asset")
+    # add_help=False: anche la voce -h va tradotta, quindi la aggiungiamo noi.
+    parser = argparse.ArgumentParser(description=t("cli.desc"), add_help=False)
+    parser.add_argument("-h", "--help", action="help", help=t("cli.help"))
+    parser.add_argument("url", nargs="?", help=t("cli.url"))
+    parser.add_argument("-o", "--out", help=t("cli.out"))
+    parser.add_argument("--delay", type=float, default=0.5, help=t("cli.delay"))
+    parser.add_argument("--force", action="store_true", help=t("cli.force"))
+    parser.add_argument("--profile", default=".chrome-profile", help=t("cli.profile"))
+    parser.add_argument("--headless", action="store_true", help=t("cli.headless"))
+    parser.add_argument("--limit", type=int, default=0, help=t("cli.limit"))
     parser.add_argument(
         "--flat",
         action="store_true",
-        help="senza sottocartelle per sezione (tutti gli zip insieme)",
+        help=t("cli.flat"),
     )
+    parser.add_argument(
+        "-L",
+        "--lang",
+        choices=LANG_CODES,
+        help=t("cli.lang"),
+    )
+    # argparse crea i titoli dei gruppi in inglese: li traduciamo qui.
+    try:
+        parser._positionals.title = t("cli.group_args")      # noqa: SLF001
+        parser._optionals.title = t("cli.group_options")     # noqa: SLF001
+    except Exception:
+        pass
     return parser
 
 
 def main(argv: list[str]) -> int:
-    args = build_parser().parse_args(argv)
-    raw_url = args.url or input("Incolla il link completo della pagina del gioco: ")
+    # La lingua va impostata prima di costruire il parser, altrimenti anche
+    # `--help` uscirebbe nella lingua sbagliata.
+    args = list(argv)
+    for index, arg in enumerate(args):
+        if arg in ("-L", "--lang") and index + 1 < len(args):
+            set_language(args[index + 1])
+            break
+        if arg.startswith("--lang="):
+            set_language(arg.split("=", 1)[1])
+            break
+
+    parsed = build_parser().parse_args(args)
+    raw_url = parsed.url or input(t("cli.prompt"))
     return run_download(
         raw_url,
-        out=args.out,
-        delay=args.delay,
-        force=args.force,
-        limit=args.limit,
-        profile=args.profile,
-        headless=args.headless,
-        flat=args.flat,
+        out=parsed.out,
+        delay=parsed.delay,
+        force=parsed.force,
+        limit=parsed.limit,
+        profile=parsed.profile,
+        headless=parsed.headless,
+        flat=parsed.flat,
     )
 
 

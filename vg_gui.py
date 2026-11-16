@@ -27,6 +27,14 @@ from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
 from vg_download import normalize_game_url, run_download
+from vg_i18n import (
+    LANGUAGES,
+    apply_language_arg,
+    language_name,
+    set_language,
+    t,
+)
+from vg_icons import apply_window_icon
 
 TITLE = "VG Resource Download"
 BG = "#1e1f22"
@@ -75,7 +83,10 @@ class App(tk.Tk):
         self.url_var = tk.StringVar(value=url.strip())
         self.dest_var = tk.StringVar(value=dest.strip())
         self.force_var = tk.BooleanVar(value=overwrite)
-        self.status_var = tk.StringVar(value="Pronto.")
+        self.status_var = tk.StringVar(value="")
+
+        # Icona della finestra, presa da icons/ (PNG o ICO che sia).
+        apply_window_icon(self)
 
         self._build_style()
         self._build_widgets()
@@ -127,48 +138,61 @@ class App(tk.Tk):
         root.pack(fill="both", expand=True)
         root.columnconfigure(0, weight=1)
 
-        header = ttk.Label(root, text=TITLE, style="Title.TLabel")
-        header.grid(row=0, column=0, sticky="w")
-        ttk.Label(
-            root,
-            text="Scarica tutti gli asset di un gioco da The Models Resource.",
-            style="Muted.TLabel",
-        ).grid(row=1, column=0, sticky="w", pady=(2, 16))
+        # --- intestazione + selettore di lingua
+        header = ttk.Frame(root)
+        header.grid(row=0, column=0, sticky="ew")
+        header.columnconfigure(0, weight=1)
+        ttk.Label(header, text=TITLE, style="Title.TLabel").grid(row=0, column=0, sticky="w")
+
+        lang_box = ttk.Frame(header)
+        lang_box.grid(row=0, column=1, sticky="e")
+        self.lang_label = ttk.Label(lang_box, text=t("gui.lang_label"), style="Muted.TLabel")
+        self.lang_label.grid(row=0, column=0, padx=(0, 6))
+        self.lang_var = tk.StringVar(value=language_name())
+        self.lang_combo = ttk.Combobox(
+            lang_box,
+            textvariable=self.lang_var,
+            state="readonly",
+            width=10,
+            values=[name for _code, name in LANGUAGES],
+        )
+        self.lang_combo.grid(row=0, column=1)
+        self.lang_combo.bind("<<ComboboxSelected>>", self._on_lang_change)
+
+        self.subtitle_lbl = ttk.Label(root, text=t("gui.subtitle"), style="Muted.TLabel")
+        self.subtitle_lbl.grid(row=1, column=0, sticky="w", pady=(2, 16))
 
         # --- link
-        ttk.Label(root, text="Link della pagina del gioco").grid(row=2, column=0, sticky="w")
+        self.url_label = ttk.Label(root, text=t("gui.url_label"))
+        self.url_label.grid(row=2, column=0, sticky="w")
         self.url_entry = ttk.Entry(root, textvariable=self.url_var)
         self.url_entry.grid(row=3, column=0, sticky="ew", pady=(4, 2))
-        ttk.Label(
-            root,
-            text="Es. https://models.spriters-resource.com/playstation_2/kh2/",
-            style="Muted.TLabel",
-        ).grid(row=4, column=0, sticky="w", pady=(0, 14))
+        self.url_hint = ttk.Label(root, text=t("gui.url_hint"), style="Muted.TLabel")
+        self.url_hint.grid(row=4, column=0, sticky="w", pady=(0, 14))
 
         # --- destinazione
-        ttk.Label(root, text="Cartella di destinazione").grid(row=5, column=0, sticky="w")
+        self.dest_label = ttk.Label(root, text=t("gui.dest_label"))
+        self.dest_label.grid(row=5, column=0, sticky="w")
         dest_row = ttk.Frame(root)
         dest_row.grid(row=6, column=0, sticky="ew", pady=(4, 2))
         dest_row.columnconfigure(0, weight=1)
         self.dest_entry = ttk.Entry(dest_row, textvariable=self.dest_var)
         self.dest_entry.grid(row=0, column=0, sticky="ew")
-        self.browse_btn = ttk.Button(dest_row, text="Sfoglia...", command=self._browse)
+        self.browse_btn = ttk.Button(dest_row, text=t("gui.browse"), command=self._browse)
         self.browse_btn.grid(row=0, column=1, padx=(8, 0))
-        ttk.Label(
-            root,
-            text="Lascia vuoto per usare download/<Gioco>, con una sottocartella per sezione.",
-            style="Muted.TLabel",
-        ).grid(row=7, column=0, sticky="w", pady=(0, 14))
+        self.dest_hint = ttk.Label(root, text=t("gui.dest_hint"), style="Muted.TLabel")
+        self.dest_hint.grid(row=7, column=0, sticky="w", pady=(0, 14))
 
         # --- opzioni + avvio
         actions = ttk.Frame(root)
         actions.grid(row=8, column=0, sticky="ew")
         actions.columnconfigure(0, weight=1)
-        ttk.Checkbutton(
-            actions, text="Sovrascrivi i file già scaricati", variable=self.force_var
-        ).grid(row=0, column=0, sticky="w")
+        self.overwrite_chk = ttk.Checkbutton(
+            actions, text=t("gui.overwrite"), variable=self.force_var
+        )
+        self.overwrite_chk.grid(row=0, column=0, sticky="w")
         self.start_btn = ttk.Button(
-            actions, text="Avvia download", style="Go.TButton", command=self._start
+            actions, text=t("gui.start"), style="Go.TButton", command=self._start
         )
         self.start_btn.grid(row=0, column=1, sticky="e")
 
@@ -197,7 +221,7 @@ class App(tk.Tk):
         footer.grid(row=12, column=0, sticky="ew", pady=(10, 0))
         footer.columnconfigure(0, weight=1)
         self.open_btn = ttk.Button(
-            footer, text="Apri cartella", command=self._open_folder, state="disabled"
+            footer, text=t("gui.open_folder"), command=self._open_folder, state="disabled"
         )
         self.open_btn.grid(row=0, column=1, sticky="e")
 
@@ -206,11 +230,35 @@ class App(tk.Tk):
         self.dest_entry.bind("<Return>", lambda _e: self._start())
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
+        self.status_var.set(t("gui.ready"))
+
+    # --------------------------------------------------- lingua / testi --
+    def _on_lang_change(self, _event=None) -> None:
+        chosen = self.lang_var.get()
+        for code, name in LANGUAGES:
+            if name == chosen:
+                set_language(code, persist=True)
+                break
+        self._retranslate()
+
+    def _retranslate(self) -> None:
+        """Riscrive tutte le etichette nella lingua attualmente selezionata."""
+        self.lang_label.configure(text=t("gui.lang_label"))
+        self.subtitle_lbl.configure(text=t("gui.subtitle"))
+        self.url_label.configure(text=t("gui.url_label"))
+        self.url_hint.configure(text=t("gui.url_hint"))
+        self.dest_label.configure(text=t("gui.dest_label"))
+        self.dest_hint.configure(text=t("gui.dest_hint"))
+        self.browse_btn.configure(text=t("gui.browse"))
+        self.overwrite_chk.configure(text=t("gui.overwrite"))
+        self.open_btn.configure(text=t("gui.open_folder"))
+        self._set_running(self.running)
+        if not self.running:
+            self.status_var.set(t("gui.ready"))
+
     def _on_close(self) -> None:
         if self.running:
-            if not messagebox.askokcancel(
-                TITLE, "Un download è in corso. Chiudere comunque?"
-            ):
+            if not messagebox.askokcancel(TITLE, t("gui.confirm_close")):
                 return
         self.destroy()
 
@@ -219,7 +267,7 @@ class App(tk.Tk):
         initial = self.dest_var.get().strip()
         initial = os.path.expanduser(initial) if initial else str(Path.home())
         chosen = filedialog.askdirectory(
-            title="Scegli la cartella di destinazione",
+            title=t("gui.choose_dest"),
             initialdir=initial if os.path.isdir(initial) else str(Path.home()),
         )
         if chosen:
@@ -234,7 +282,9 @@ class App(tk.Tk):
     def _set_running(self, running: bool) -> None:
         self.running = running
         state = "disabled" if running else "normal"
-        self.start_btn.configure(state=state, text="Download in corso..." if running else "Avvia download")
+        self.start_btn.configure(
+            state=state, text=t("gui.running") if running else t("gui.start")
+        )
         self.browse_btn.configure(state=state)
         self.url_entry.configure(state=state)
         self.dest_entry.configure(state=state)
@@ -245,13 +295,13 @@ class App(tk.Tk):
 
         raw_url = self.url_var.get().strip()
         if not raw_url:
-            messagebox.showwarning(TITLE, "Inserisci il link della pagina del gioco.")
+            messagebox.showwarning(TITLE, t("gui.need_url"))
             self.url_entry.focus_set()
             return
         try:
             url = normalize_game_url(raw_url)
         except SystemExit:
-            messagebox.showerror(TITLE, "Il link inserito non è valido.")
+            messagebox.showerror(TITLE, t("gui.invalid_url"))
             return
 
         self.url_var.set(url)
@@ -261,7 +311,7 @@ class App(tk.Tk):
         self.log.configure(state="normal")
         self.log.delete("1.0", "end")
         self.log.configure(state="disabled")
-        self.status_var.set("Avvio...")
+        self.status_var.set(t("gui.starting"))
         self._set_running(True)
 
         dest = self.dest_var.get().strip()
@@ -280,7 +330,7 @@ class App(tk.Tk):
                     on_out_dir=lambda path: self.events.put(("outdir", path)),
                 )
             except Exception as exc:  # pragma: no cover - difensivo
-                self.events.put(("line", f"ERRORE imprevisto: {exc}"))
+                self.events.put(("line", t("gui.unexpected", exc=exc)))
                 code = 1
             self.events.put(("done", code))
 
@@ -304,12 +354,17 @@ class App(tk.Tk):
                     _, done, total, label, status = event
                     if status == "start":
                         self.progress.configure(maximum=max(1, total), value=0)
-                        self.status_var.set(f"0/{total} - {label}")
+                        self.status_var.set(t("gui.progress", done=0, total=total, label=label))
                     else:
                         self.progress.configure(maximum=max(1, total), value=done)
-                        word = {"ok": "scaricato", "skip": "già presente", "fail": "fallito"}
+                        word = {
+                            "ok": t("gui.word.ok"),
+                            "skip": t("gui.word.skip"),
+                            "fail": t("gui.word.fail"),
+                        }.get(status, status)
                         self.status_var.set(
-                            f"{done}/{total} - {word.get(status, status)}: {label}"
+                            t("gui.progress_word", done=done, total=total,
+                              word=word, label=label)
                         )
                 elif kind == "outdir":
                     self.out_dir = event[1]
@@ -337,14 +392,14 @@ class App(tk.Tk):
     def _finish(self, code: int) -> None:
         self._set_running(False)
         if code == 0:
-            self.status_var.set("Completato.")
+            self.status_var.set(t("gui.done"))
             self.progress.configure(value=self.progress.cget("maximum"))
         elif code == 130:
-            self.status_var.set("Interrotto.")
+            self.status_var.set(t("gui.interrupted"))
         elif code == 2:
-            self.status_var.set("Completato con alcuni errori (vedi log).")
+            self.status_var.set(t("gui.partial"))
         else:
-            self.status_var.set("Terminato con errori (vedi log).")
+            self.status_var.set(t("gui.errors"))
         if self.out_dir:
             self.open_btn.configure(state="normal")
 
@@ -354,7 +409,8 @@ def main(argv: list[str]) -> int:
     dest = ""
     overwrite = False
 
-    args = list(argv)
+    # --lang va tolto prima: il resto del parsing è scritto a mano.
+    args = apply_language_arg(list(argv))
     index = 0
     while index < len(args):
         arg = args[index]
@@ -374,24 +430,7 @@ def main(argv: list[str]) -> int:
         index += 1
 
     if not tk_available():
-        print(
-            "tkinter non è disponibile in questo Python.\n"
-            "\n"
-            "tkinter non è un pacchetto pip (fa parte della standard library):\n"
-            "va fornito dal Python di sistema. Il launcher download.sh prova a\n"
-            "prepararne una copia locale in .tk-bundle senza sudo; qui trovi le\n"
-            "alternative manuali:\n"
-            "\n"
-            "  Debian/Ubuntu:  sudo apt install python3-tk\n"
-            "  Fedora:         sudo dnf install python3-tkinter\n"
-            "  Arch:           sudo pacman -S tk\n"
-            "  macOS:          usa il Python di python.org (include Tk)\n"
-            "                  oppure: brew install python-tk\n"
-            "  Windows:        reinstallando Python spunta \"tcl/tk\"\n"
-            "\n"
-            "Nel frattempo puoi usare la versione a terminale: python vg_tui.py",
-            file=sys.stderr,
-        )
+        print(t("gui.tk_missing"), file=sys.stderr)
         return 3
 
     try:

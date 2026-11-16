@@ -32,6 +32,42 @@ volta, poi apre l'interfaccia grafica.
 Dalla GUI puoi anche scegliere la cartella con **Sfoglia...** e aprire la
 cartella alla fine con **Apri cartella**.
 
+## Lingue
+
+L'interfaccia è disponibile in **italiano**, **inglese** e **francese**. Il
+selettore **Lingua** è in alto a destra nella GUI (e nella TUI, alla voce
+`Lingua`); la scelta viene ricordata nel file di configurazione
+(`~/.config/vg-resource-download/settings.json`).
+
+Si può forzare la lingua anche da riga di comando o con una variabile
+d'ambiente:
+
+```bash
+./download.sh --lang fr          # oppure -L en
+VG_LANG=it ./download.sh --tui
+```
+
+Senza indicazioni vale la lingua di sistema (`LANG`), con l'italiano come
+ripiego. I testi stanno tutti in `vg_i18n.py`.
+
+## Icona
+
+L'icona è nella cartella `icons/` (pacchetto generato per web, Android e iOS):
+la GUI usa `icons/web/icon-512.png` e `icon-192.png`, la TUI resta nel
+terminale.
+
+Su Linux puoi aggiungere l'icona e le voci nel menu delle applicazioni senza
+sudo:
+
+```bash
+./install-desktop-icon.sh            # installa (o aggiorna)
+./install-desktop-icon.sh --uninstall  # rimuove
+```
+
+Crea **VG Resource Download** (GUI) e **VG Resource Download (TUI)** nel menu.
+Su macOS e Windows l'icona compare già nella finestra della GUI; per usarla
+anche come icona di un collegamento basta puntare `icons/web/favicon.ico`.
+
 ### tkinter (la libreria della GUI)
 
 `tkinter` **non è un pacchetto pip**: è un'estensione della standard library
