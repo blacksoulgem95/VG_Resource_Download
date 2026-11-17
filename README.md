@@ -310,7 +310,8 @@ gpg --verify VG_Resource_Download-1.0.0-x86_64.AppImage.asc \
 
 Segreti della CI: `GPG_PRIVATE_KEY` (chiave esportata con
 `gpg --armor --export-secret-keys`) e `GPG_PASSPHRASE` se la chiave è
-protetta. La release allega anche `SHA256SUMS.txt`.
+protetta. La release allega `SHA256SUMS.txt` (per tutti i pacchetti) e
+`GPG-KEY.asc` (la chiave pubblica per verificare la firma dell'AppImage).
 
 ## Note
 
