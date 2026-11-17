@@ -10,6 +10,21 @@ prendono sempre `403`, quindi il lavoro lo fa un vero Chrome pilotato da
 conserva il cookie `cf_clearance` nel profilo `.chrome-profile` e i download
 passano dal suo contesto HTTP autenticato.
 
+## Installazione
+
+Sulla pagina [Releases](https://github.com/blacksoulgem95/VG_Resource_Download/releases)
+ci sono i pacchetti già pronti:
+
+| Sistema | File | Installazione |
+|---|---|---|
+| Windows | `VG_Resource_Download-<ver>-x64-setup.exe` | esegui l'installer (NSIS) |
+| macOS | `VG_Resource_Download-<ver>-arm64.dmg` / `-x64.dmg` | apri il DMG e trascina l'app in *Applicazioni* |
+| Linux | `VG_Resource_Download-<ver>-x86_64.AppImage` | `chmod +x` e avvia |
+
+Nulla da installare a parte: l'app usa il Chrome (o Chromium/Edge/Brave) già
+presente nel sistema. In alternativa si può partire dai sorgenti con i
+launcher qui sotto.
+
 ## Avvio rapido
 
 | Sistema | Comando |
@@ -127,13 +142,103 @@ Specificando `-o` (o scegliendo la cartella nella GUI o nella TUI) quella
 diventa la cartella del gioco e le sottocartelle per sezione restano. Con
 `--flat` si ottiene invece la vecchia struttura piatta.
 
+Quando l'app è installata il percorso predefinito non può stare accanto
+all'eseguibile (Program Files e `/opt` sono in sola lettura), quindi diventa:
+
+| Sistema | Download | Profilo Chrome | Impostazioni |
+| --- | --- | --- | --- |
+| Linux | `~/Downloads/VG Resource Download/` | `~/.local/share/vg-resource-download/chrome-profile/` | `~/.config/vg-resource-download/settings.json` |
+| macOS | `~/Downloads/VG Resource Download/` | `~/Library/Application Support/vg-resource-download/chrome-profile/` | `~/Library/Application Support/vg-resource-download/settings.json` |
+| Windows | `%USERPROFILE%\Downloads\VG Resource Download\` | `%LOCALAPPDATA%\vg-resource-download\chrome-profile\` | `%LOCALAPPDATA%\vg-resource-download\settings.json` |
+
+Le variabili `VG_DOWNLOAD_DIR` e `VG_PROFILE` forzano i primi due percorsi.
+
 ## File
 
 - `vg_download.py` – motore: parsing della pagina e download
 - `vg_gui.py` – interfaccia grafica tkinter
 - `vg_tui.py` – interfaccia a terminale (senza curses, portabile)
+- `vg_launcher.py` – punto d'ingresso unico (`--gui`, `--tui`, CLI)
+- `vg_i18n.py` – traduzioni italiano/inglese/francese
+- `vg_icons.py` – icona della finestra e dell'app
+- `vg_paths.py` – percorsi corretti anche da installata
+- `vg_version.py` – versione e metadati, unica fonte
 - `download.sh`, `download.bat`, `download-macos.command` – launcher per sistema
+- `packaging/` – icone native, spec PyInstaller e script dei tre installer
+- `.github/workflows/build.yml` – la pipeline che compila i pacchetti
 - `.tk-bundle/` – solo se serve: copia locale di tkinter preparata da `download.sh`
+
+## Compilare gli installer
+
+L'app si impacchetta con **PyInstaller** in modalità *onedir* (avvio più
+rapido e meno falsi positivi degli antivirus rispetto al *onefile*). I browser
+di Playwright **non** vengono inclusi: si usa il Chrome installato
+dall'utente, così il pacchetto resta ~65 MB compresso invece di ~400.
+
+Serve Python 3.12 e queste dipendenze:
+
+```bash
+python -m pip install playwright pyinstaller pillow
+```
+
+### Linux → AppImage
+
+```bash
+python packaging/make_icons.py                       # icone native da icons/web/
+pyinstaller --noconfirm --clean packaging/vgdl.spec  # → dist/VGResourceDownload/
+bash packaging/linux/build-appimage.sh               # → dist/*.AppImage
+```
+
+`build-appimage.sh` scarica `appimagetool` in `packaging/build/` e lo esegue
+con `--appimage-extract-and-run`, quindi non serve FUSE né `sudo`.
+Se il Python di sistema non ha tkinter, `packaging/bootstrap-tk.sh` lo
+estrae in `.tk-bundle/` senza privilegi:
+
+```bash
+eval "$(bash packaging/bootstrap-tk.sh --export)"
+```
+
+### Windows → installer NSIS
+
+```powershell
+python packaging\make_icons.py
+pyinstaller --noconfirm --clean packaging\vgdl.spec
+powershell -ExecutionPolicy Bypass -File packaging\windows\build-installer.ps1
+```
+
+Serve [NSIS](https://nsis.sourceforge.io/) 3.x (`makensis`). L'installer crea
+la voce nel menu Start, il collegamento sul desktop, un comando `vgdl` in
+`%LOCALAPPDATA%\Microsoft\WindowsApps` (già nel PATH) e la voce in *App e
+funzionalità*. Alla disinstallazione chiede se rimuovere anche i dati locali.
+
+### macOS → DMG
+
+```bash
+python packaging/make_icons.py
+pyinstaller --noconfirm --clean packaging/vgdl.spec   # → dist/VG Resource Download.app
+bash packaging/macos/build-dmg.sh                     # → dist/*.dmg
+```
+
+Lo script firma l'app (ad-hoc se non c'è un certificato) e, se sono impostate
+le variabili `MACOS_CERT_P12`, `MACOS_CERT_PASSWORD`, `MACOS_NOTARY_APPLE_ID`,
+`MACOS_NOTARY_PASSWORD` e `MACOS_NOTARY_TEAM_ID`, importa il certificato,
+firma con Developer ID e invia a notarizzazione.
+
+### GitHub Actions
+
+`.github/workflows/build.yml` compila tutto su quattro runner
+(`ubuntu-22.04`, `windows-latest`, `macos-latest`, `macos-13`) a ogni push e
+pull request, e allega i file alla release quando si pusha un tag `v*`:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Gli artefatti della build (senza tag, quindi senza release) restano
+scaricabili dalla pagina della Action per 14 giorni. Senza i secret macOS la
+DMG esce firmata ad-hoc: funziona, ma al primo avvio serve *tasto destro →
+Apri*.
 
 ## Note
 

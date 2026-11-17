@@ -1,0 +1,22 @@
+#!/bin/sh
+# AppRun — punto d'ingresso dell'AppImage.
+#
+# L'app PyInstaller è un bundle "onedir": l'eseguibile cerca la cartella
+# `_internal` **accanto a sé**. Per questo non mettiamo un symlink in
+# usr/bin (il bootloader seguirebbe il link e si perderebbe), ma lanciamo
+# direttamente il percorso reale dentro usr/lib.
+
+HERE="$(dirname "$(readlink -f "$0")")"
+export APPDIR="${APPDIR:-$HERE}"
+
+APP="$HERE/usr/lib/vg-resource-download/vgdl"
+
+if [ ! -x "$APP" ]; then
+    echo "Eseguibile non trovato: $APP" >&2
+    exit 127
+fi
+
+# Wayland: Tk 8.6 parla solo X11. Se c'è XWayland va bene, altrimenti
+# conviene che la finestra passi da X. Non forziamo nulla, solo
+# suggeriamo il fallback se il display risulta rotto.
+exec "$APP" "$@"

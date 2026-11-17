@@ -19,7 +19,20 @@ import os
 import sys
 from pathlib import Path
 
-ICONS_DIR = Path(__file__).resolve().parent / "icons"
+
+def _base_dir() -> Path:
+    """Cartella da cui leggere `icons/`, anche dentro l'eseguibile PyInstaller.
+
+    In un bundle onedir/onefile PyInstaller sposta i dati in `sys._MEIPASS`;
+    fuori dal bundle i file stanno accanto a questo modulo.
+    """
+    meipass = getattr(sys, "_MEIPASS", None)
+    if getattr(sys, "frozen", False) and meipass:
+        return Path(meipass)
+    return Path(__file__).resolve().parent
+
+
+ICONS_DIR = _base_dir() / "icons"
 
 # Ordine di preferenza: prima i PNG (netti anche in alto), poi l'ico.
 PNG_ORDER = ("icon-192.png", "icon-512.png")

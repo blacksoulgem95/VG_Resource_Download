@@ -1,0 +1,6 @@
+# Dipendenze di esecuzione.
+#
+# L'unica vera dipendenza è Playwright (che pilota il Chrome installato nel
+# sistema). tkinter non è qui: fa parte della libreria standard e su Linux
+# arriva col pacchetto `python3-tk`.
+playwright>=1.40

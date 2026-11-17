@@ -2,6 +2,7 @@
 # Ambiente Python/launcher (generati automaticamente, non versionare)
 # ---------------------------------------------------------------------------
 .venv/
+.build-venv/
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -23,6 +24,21 @@ download/
 
 # Download parziali
 *.part
+
+# ---------------------------------------------------------------------------
+# Build / packaging
+#
+# dist/ contiene i bundle PyInstaller (~200 MB l'uno) e packaging/build/ gli
+# artefatti intermedi. Le icone native in packaging/icons/ sono invece
+# generate ma versionate, perché servono ai runner senza Pillow: per
+# rigenerarle basta `python packaging/make_icons.py`.
+# ---------------------------------------------------------------------------
+dist/
+build/
+packaging/build/
+*.spec.bak
+appimagetool*.AppImage
+*.AppDir/
 
 # ---------------------------------------------------------------------------
 # Sistema operativo / editor

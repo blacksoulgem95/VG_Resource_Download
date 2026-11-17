@@ -1,0 +1,284 @@
+# ---------------------------------------------------------------------------
+# Costruisce gli installer per i tre sistemi e, sui tag `v*`, pubblica la
+# release con i file allegati.
+#
+#   Linux    → .AppImage        (ubuntu-22.04: glibc 2.35, gira ovunque)
+#   Windows  → setup .exe       (NSIS, x64)
+#   macOS    → .dmg             (arm64 + Intel)
+#
+# Il bundle lo fa PyInstaller (packaging/vgdl.spec); poi ogni sistema ha il suo
+# script di packaging in packaging/<sistema>/. I browser di Playwright NON
+# vengono inclusi: l'app usa il Chrome installato dall'utente.
+# ---------------------------------------------------------------------------
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths-ignore:
+      - "**.md"
+      - ".gitignore"
+      - "icons/**"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  # Nessun bytecode nei pacchetti e log più leggibili.
+  PYTHONDONTWRITEBYTECODE: "1"
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  # ===========================================================================
+  linux:
+    name: Linux (AppImage)
+    # 22.04 e non latest: la glibc del runner diventa il requisito minimo
+    # dell'AppImage (qui 2.35), quindi resta compatibile con le distribuzioni
+    # più vecchie.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # Qui si usa il Python di sistema (3.10 su 22.04) invece di
+      # actions/setup-python: quei build non includono tkinter e il
+      # `_tkinter.so` del pacchetto apt ha l'ABI di un'altra minor, quindi
+      # non si può caricare. Con il Python di sistema `python3-tk` combacia
+      # sempre.
+      - name: Installa Python e tkinter
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3 python3-venv python3-tk
+          python3 -c "import tkinter; print('tkinter', tkinter.TkVersion)"
+          python3 -m venv .build-venv
+          .build-venv/bin/python -m pip install --upgrade pip
+          .build-venv/bin/pip install -r requirements-build.txt
+          echo "$PWD/.build-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Genera le icone native
+        run: python packaging/make_icons.py
+
+      - name: Build (PyInstaller)
+        run: pyinstaller --noconfirm --clean packaging/vgdl.spec
+
+      - name: Smoke test del bundle
+        run: |
+          set -euo pipefail
+          ./dist/VGResourceDownload/vgdl --version
+          ./dist/VGResourceDownload/vgdl --help > /dev/null
+          # La GUI deve avere tkinter dentro, non solo il CLI.
+          find dist/VGResourceDownload/_internal -name '_tkinter*.so' | head -1 | grep -q .
+          echo "tkinter incluso"
+
+      - name: Crea l'AppImage
+        run: bash packaging/linux/build-appimage.sh
+
+      - name: Prova l'AppImage
+        run: |
+          set -euo pipefail
+          APPIMAGE=$(ls dist/*.AppImage | head -n 1)
+          chmod +x "$APPIMAGE"
+          "$APPIMAGE" --appimage-extract-and-run --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: dist/*.AppImage
+          if-no-files-found: error
+          retention-days: 14
+
+  # ===========================================================================
+  windows:
+    name: Windows (NSIS)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-build.txt
+
+      - name: Installa le dipendenze di build
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-build.txt
+
+      - name: Genera le icone native
+        run: python packaging/make_icons.py
+
+      - name: Build (PyInstaller)
+        run: pyinstaller --noconfirm --clean packaging/vgdl.spec
+
+      - name: Smoke test del bundle
+        run: |
+          dist\VGResourceDownload\vgdl.exe --version
+          if (-not (Test-Path 'dist\VGResourceDownload\VG Resource Download.exe')) {
+              throw 'manca l eseguibile GUI'
+          }
+          if (-not (Test-Path 'dist\VGResourceDownload\_internal\tkinter')) {
+              throw 'tkinter non incluso nel bundle'
+          }
+
+      - name: Assicura NSIS
+        run: |
+          $nsis = @(
+            'C:\Program Files (x86)\NSIS\makensis.exe',
+            'C:\Program Files\NSIS\makensis.exe'
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $nsis) {
+            choco install nsis -y --no-progress
+          }
+
+      - name: Crea l'installer
+        run: powershell -ExecutionPolicy Bypass -File packaging/windows/build-installer.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/*setup.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  # ===========================================================================
+  macos-arm64:
+    name: macOS (dmg, arm64)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-build.txt
+
+      - name: Installa le dipendenze di build
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-build.txt
+
+      - name: Genera le icone native
+        run: python packaging/make_icons.py
+
+      - name: Build (PyInstaller)
+        run: |
+          pyinstaller --noconfirm --clean packaging/vgdl.spec
+          test -d "dist/VG Resource Download.app"
+
+      - name: Smoke test del bundle
+        run: |
+          set -euo pipefail
+          "dist/VG Resource Download.app/Contents/MacOS/vgdl" --version
+          ls "dist/VG Resource Download.app/Contents/Resources/" | grep -qi icns \
+            && echo "icona presente"
+
+      - name: Crea il DMG
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+        run: bash packaging/macos/build-dmg.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+  # ===========================================================================
+  macos-intel:
+    name: macOS (dmg, Intel)
+    # macos-13 è l'ultimo runner Intel gratuito e GitHub lo sta ritirando:
+    # se sparisce la build Intel viene saltata senza bloccare la release.
+    runs-on: macos-13
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-build.txt
+
+      - name: Installa le dipendenze di build
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-build.txt
+
+      - name: Genera le icone native
+        run: python packaging/make_icons.py
+
+      - name: Build (PyInstaller)
+        run: |
+          pyinstaller --noconfirm --clean packaging/vgdl.spec
+          test -d "dist/VG Resource Download.app"
+
+      - name: Smoke test del bundle
+        run: |
+          set -euo pipefail
+          "dist/VG Resource Download.app/Contents/MacOS/vgdl" --version
+
+      - name: Crea il DMG
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+        run: bash packaging/macos/build-dmg.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-intel-dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+  # ===========================================================================
+  # Release: solo sui tag v*, quando tutti e quattro i job sono passati.
+  # ===========================================================================
+  release:
+    name: Pubblica la release
+    needs: [linux, windows, macos-arm64, macos-intel]
+    # Il job Intel è in continue-on-error, quindi non basta `needs` per
+    # bloccarlo: si chiede esplicitamente la riuscita degli altri tre.
+    if: |
+      !cancelled() && startsWith(github.ref, 'refs/tags/v') &&
+      needs.linux.result == 'success' &&
+      needs.windows.result == 'success' &&
+      needs['macos-arm64'].result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Controlla i file raccolti
+        run: |
+          set -euo pipefail
+          ls -la artifacts
+          for f in artifacts/*.AppImage artifacts/*.dmg artifacts/*setup.exe; do
+            [ -e "$f" ] || { echo "manca $f"; exit 1; }
+          done
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=VG Resource Download
+GenericName=Game asset downloader
+Comment=Download every asset of a game from The Models Resource
+Comment[it]=Scarica tutti gli asset di un gioco da The Models Resource
+Comment[fr]=Télécharge toutes les ressources d'un jeu depuis The Models Resource
+Exec=vgdl
+Icon=vg-resource-download
+Terminal=false
+Categories=Utility;Network;
+Keywords=vg-resource;models;sprites;textures;download;assets;
+StartupNotify=true
+StartupWMClass=Tk

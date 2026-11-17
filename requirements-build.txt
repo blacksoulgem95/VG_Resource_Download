@@ -1,0 +1,9 @@
+# Dipendenze solo per compilare i pacchetti (non vanno nel bundle).
+#
+#   python -m pip install -r requirements-build.txt
+#
+# Pillow serve a packaging/make_icons.py (genera .ico e .icns dai PNG),
+# PyInstaller a creare il bundle. Nessuno dei due finisce nell'app.
+-r requirements.txt
+pyinstaller>=6.0
+pillow>=10.0

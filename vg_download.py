@@ -45,6 +45,7 @@ from pathlib import Path
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from vg_i18n import LANG_CODES, set_language, t
+from vg_paths import default_download_dir, default_profile_dir, ensure_dir
 
 CHALLENGE_MARKERS = (
     "just a moment",
@@ -76,8 +77,7 @@ SECTION_RE = re.compile(r'<span class="asset-count">\[\d+\]</span>\s*([^<]+)')
 ICON_PATH_RE = re.compile(r"/media/asset_icons/(\d+)/(\d+)\.png")
 ASSET_HREF_RE = re.compile(r"/(?:[^/]+)/(?:[^/]+)/asset/(\d+)/")
 
-# Cartella creata quando non se ne indica una: download/<Gioco>/<Sezione>/
-DEFAULT_DOWNLOAD_DIR = "download"
+# Nome della cartella usata quando non se ne indica una (vedi vg_paths.py)
 
 
 def log(msg: str = "") -> None:
@@ -325,7 +325,7 @@ def run_download(
     delay: float = 0.5,
     force: bool = False,
     limit: int = 0,
-    profile: str = ".chrome-profile",
+    profile: str | None = None,
     headless: bool = False,
     flat: bool = False,
     on_line=None,
@@ -355,6 +355,11 @@ def run_download(
     from playwright.sync_api import sync_playwright
 
     chrome = find_chrome()
+    # Installata, l'app non può scrivere accanto all'eseguibile: profilo e
+    # download vanno nelle cartelle utente (vedi vg_paths.py).
+    if not profile:
+        profile = default_profile_dir()
+    ensure_dir(Path(profile))
 
     with sync_playwright() as pw:
         launch_opts = dict(
@@ -396,9 +401,9 @@ def run_download(
             if limit and limit > 0:
                 assets = assets[:limit]
 
-            out_dir = Path(os.path.expanduser(out)) if out else Path(
-                DEFAULT_DOWNLOAD_DIR
-            ) / folder_name(game_title)
+            out_dir = Path(os.path.expanduser(out)) if out else default_download_dir() / folder_name(
+                game_title
+            )
             out_dir.mkdir(parents=True, exist_ok=True)
             if on_out_dir is not None:
                 on_out_dir(str(out_dir.resolve()))
@@ -516,7 +521,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-o", "--out", help=t("cli.out"))
     parser.add_argument("--delay", type=float, default=0.5, help=t("cli.delay"))
     parser.add_argument("--force", action="store_true", help=t("cli.force"))
-    parser.add_argument("--profile", default=".chrome-profile", help=t("cli.profile"))
+    parser.add_argument(
+        "--profile", default=None, help=t("cli.profile")
+    )
     parser.add_argument("--headless", action="store_true", help=t("cli.headless"))
     parser.add_argument("--limit", type=int, default=0, help=t("cli.limit"))
     parser.add_argument(
