@@ -6,6 +6,10 @@
 ;   makensis /DROOTDIR=... /DDISTDIR=... /DOUTFILE=... /DVERSION=... ^
 ;            /DVERSION4=... packaging\windows\installer.nsi
 ;
+; Per il bundle arm64 si aggiunge /DARM64: cambia solo l'etichetta mostrata e
+; la vista del registro, dato che i file da impacchettare sono già quelli
+; giusti (PyInstaller non fa cross-compilazione).
+;
 ; Installa in %PROGRAMFILES%\VG Resource Download con due eseguibili:
 ;
 ;   VG Resource Download.exe   GUI, senza console (menu Start / desktop)
@@ -43,6 +47,17 @@ SetCompressor /SOLID lzma
     !define ROOTDIR "..\.."
 !endif
 
+; --- architettura ------------------------------------------------------------
+; Il bundle è già compilato per una sola architettura: qui serve solo a
+; etichettare l'installer e a scegliere la vista del registro corretta.
+!ifdef ARM64
+    !define APP_ARCH       "ARM64"
+    !define APP_ARCH_LABEL " (ARM64)"
+!else
+    !define APP_ARCH       "x64"
+    !define APP_ARCH_LABEL ""
+!endif
+
 !define APP_NAME      "VG Resource Download"
 !define APP_EXE       "VG Resource Download.exe"
 !define APP_CLI       "vgdl.exe"
@@ -56,7 +71,7 @@ OutFile "${OUTFILE}"
 InstallDir "$PROGRAMFILES64\${APP_NAME}"
 InstallDirRegKey HKLM "Software\${APP_NAME}" "InstallDir"
 RequestExecutionLevel admin
-BrandingText "${APP_NAME} ${VERSION}"
+BrandingText "${APP_NAME} ${VERSION} · ${APP_ARCH}"
 ShowInstDetails show
 ShowUninstDetails show
 
@@ -66,8 +81,20 @@ VIAddVersionKey "ProductVersion"  "${VERSION}"
 VIAddVersionKey "FileVersion"     "${VERSION}"
 VIAddVersionKey "CompanyName"     "${APP_PUBLISHER}"
 VIAddVersionKey "LegalCopyright"  "MIT License"
-VIAddVersionKey "FileDescription" "${APP_NAME} Setup"
+VIAddVersionKey "FileDescription" "${APP_NAME} Setup${APP_ARCH_LABEL}"
 VIAddVersionKey "Comments"        "${APP_URL}"
+
+; --- init --------------------------------------------------------------------
+; Senza SetRegView un installer a 32 bit finirebbe in WOW6432Node, creando una
+; voce di disinstallazione che il pannello di controllo a 64 bit non vede.
+; Serve anche per far combaciare la chiave letta da InstallDirRegKey.
+Function .onInit
+    SetRegView 64
+FunctionEnd
+
+Function un.onInit
+    SetRegView 64
+FunctionEnd
 
 ; --- aspetto -----------------------------------------------------------------
 !define MUI_ICON   "${ROOTDIR}\packaging\icons\app.ico"

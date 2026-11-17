@@ -17,8 +17,8 @@ ci sono i pacchetti già pronti:
 
 | Sistema | File | Installazione |
 |---|---|---|
-| Windows | `VG_Resource_Download-<ver>-x64-setup.exe` | esegui l'installer (NSIS) |
-| macOS | `VG_Resource_Download-<ver>-arm64.dmg` / `-x64.dmg` | apri il DMG e trascina l'app in *Applicazioni* |
+| Windows | `VG_Resource_Download-<ver>-x64-setup.exe` (o `-arm64-`) | esegui l'installer (NSIS) |
+| macOS | `VG_Resource_Download-<ver>-arm64.dmg` | apri il DMG e trascina l'app in *Applicazioni* (Apple Silicon; su Intel serve Rosetta 2 o la build dai sorgenti) |
 | Linux | `VG_Resource_Download-<ver>-x86_64.AppImage` | `chmod +x` e avvia |
 
 Nulla da installare a parte: l'app usa il Chrome (o Chromium/Edge/Brave) già
@@ -227,8 +227,8 @@ firma con Developer ID e invia a notarizzazione.
 ### GitHub Actions
 
 `.github/workflows/build.yml` compila tutto su quattro runner
-(`ubuntu-22.04`, `windows-latest`, `macos-latest`, `macos-13`) a ogni push e
-pull request, e allega i file alla release quando si pusha un tag `v*`:
+(`ubuntu-22.04`, `windows-latest`, `windows-11-arm`, `macos-latest`) a ogni
+push e pull request, e allega i file alla release quando si pusha un tag `v*`:
 
 ```bash
 git tag v1.0.0
@@ -239,6 +239,15 @@ Gli artefatti della build (senza tag, quindi senza release) restano
 scaricabili dalla pagina della Action per 14 giorni. Senza i secret di firma i
 pacchetti escono non firmati: funzionano, ma Windows mostra SmartScreen e
 macOS al primo avvio chiede *tasto destro → Apri*.
+
+I job obbligatori per la release sono `linux`, `windows` (x64) e `macos-arm64`.
+Il job `windows-arm64` gira su `windows-11-arm`, un runner in anteprima
+pubblica: è marcato `continue-on-error`, quindi se il runner non è disponibile
+la release esce lo stesso e semplicemente non contiene il setup ARM64. Il job
+verifica che il `vgdl.exe` prodotto abbia davvero la macchina PE attesa
+(`0xAA64` per ARM64, `0x8664` per x64): PyInstaller non fa cross-compilazione,
+quindi un bundle sbagliato verrebbe scoperto solo all'avvio sull'hardware
+giusto.
 
 ## Firma dei pacchetti
 

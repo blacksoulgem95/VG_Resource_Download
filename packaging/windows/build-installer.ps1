@@ -15,13 +15,24 @@
 .PARAMETER Makensis
     Percorso di makensis.exe, se non è nel PATH.
 
+.PARAMETER Arch
+    Architettura del bundle: `x64`, `arm64` oppure `auto` (default). Con `auto`
+    si ricava da PROCESSOR_ARCHITECTURE, ma su un runner arm64 che esegue
+    PowerShell sotto emulazione può risultare AMD64: in CI conviene passarla
+    esplicitamente.
+
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File packaging\windows\build-installer.ps1
+
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File packaging\windows\build-installer.ps1 -Arch arm64
 #>
 [CmdletBinding()]
 param(
     [string]$Version,
-    [string]$Makensis
+    [string]$Makensis,
+    [ValidateSet('auto', 'x64', 'arm64')]
+    [string]$Arch = 'auto'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -69,7 +80,9 @@ if (-not $Makensis) {
 }
 
 $OutFile = Join-Path $Root "dist\VG_Resource_Download-$Version-x64-setup.exe"
-$Arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
+if ($Arch -eq 'auto') {
+    $Arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
+}
 if ($Arch -eq 'arm64') {
     $OutFile = Join-Path $Root "dist\VG_Resource_Download-$Version-arm64-setup.exe"
 }
@@ -77,17 +90,23 @@ if ($Arch -eq 'arm64') {
 Write-Host "==> NSIS: $Makensis"
 Write-Host "==> Sorgente: $Dist"
 Write-Host "==> Versione: $Version ($Version4)"
+Write-Host "==> Arch:     $Arch"
 Write-Host "==> Uscita:   $OutFile"
 
 if (Test-Path $OutFile) { Remove-Item $OutFile -Force }
 
-& $Makensis `
-    "/DROOTDIR=$Root" `
-    "/DDISTDIR=$Dist" `
-    "/DOUTFILE=$OutFile" `
-    "/DVERSION=$Version" `
-    "/DVERSION4=$Version4" `
-    (Join-Path $PSScriptRoot 'installer.nsi')
+# /DARM64 cambia etichetta e vista del registro. Insieme al flag va data anche
+# la stessa definizione al compilatore NSIS come /D prima del file .nsi.
+$defines = @(
+    "/DROOTDIR=$Root",
+    "/DDISTDIR=$Dist",
+    "/DOUTFILE=$OutFile",
+    "/DVERSION=$Version",
+    "/DVERSION4=$Version4"
+)
+if ($Arch -eq 'arm64') { $defines += '/DARM64' }
+
+& $Makensis @defines (Join-Path $PSScriptRoot 'installer.nsi')
 
 if ($LASTEXITCODE -ne 0) { Fail "makensis è uscito con codice $LASTEXITCODE" }
 if (-not (Test-Path $OutFile)) { Fail "installer non prodotto: $OutFile" }

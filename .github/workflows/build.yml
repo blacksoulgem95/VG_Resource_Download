@@ -3,12 +3,17 @@
 # release con i file allegati.
 #
 #   Linux    → .AppImage        (ubuntu-22.04: glibc 2.35, gira ovunque)
-#   Windows  → setup .exe       (NSIS, x64, firmato Authenticode)
-#   macOS    → .dmg             (arm64 + Intel, firmato Developer ID)
+#   Windows  → setup .exe       (NSIS, x64 + arm64, firmato Authenticode)
+#   macOS    → .dmg             (arm64, firmato Developer ID)
 #
 # Il bundle lo fa PyInstaller (packaging/vgdl.spec); poi ogni sistema ha il suo
 # script di packaging in packaging/<sistema>/. I browser di Playwright NON
 # vengono inclusi: l'app usa il Chrome installato dall'utente.
+#
+# Le build arm64 (Windows su runner ARM, macOS Apple Silicon) sono obbligatorie
+# per la release macOS e *sperimentali* su Windows: `windows-11-arm` è un
+# runner in anteprima, quindi se sparisce la release esce lo stesso con il solo
+# installer x64.
 #
 # Firma: senza i segreti le build riescono comunque, ma i pacchetti escono non
 # firmati (macOS ripiega su una firma ad hoc). Vedi README → "Firma dei
@@ -121,11 +126,17 @@ jobs:
           retention-days: 14
 
   # ===========================================================================
+  # Windows. Gli step sono identici per le due architetture: cambia solo il
+  # runner e VG_ARCH, che build-installer.ps1 usa per il nome del file e per
+  # /DARM64. L'ancora &windows_steps evita di duplicarli.
+  # ===========================================================================
   windows:
-    name: Windows (NSIS)
+    name: Windows (NSIS, x64)
     runs-on: windows-latest
     timeout-minutes: 45
-    steps:
+    env:
+      VG_ARCH: x64
+    steps: &windows_steps
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
@@ -152,6 +163,22 @@ jobs:
             Get-ChildItem packaging\build -Recurse -Filter 'warn-*.txt' -ErrorAction SilentlyContinue |
               ForEach-Object { Write-Host "--- $($_.Name) ---"; Get-Content $_.FullName -Head 40 }
             exit 1
+          }
+
+      - name: Verifica l'architettura del bundle
+        run: |
+          # Se il bundle non è dell'architettura attesa, l'installer
+          # installerebbe eseguibili che il sistema non sa avviare.
+          $exe = 'dist\VGResourceDownload\vgdl.exe'
+          $machine = (Get-Item $exe).VersionInfo | Out-Null
+          $bytes = [System.IO.File]::ReadAllBytes($exe)
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+          $machineId = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          # 0x8664 = x64, 0xAA64 = ARM64
+          $actual = switch ($machineId) { 0x8664 { 'x64' } 0xAA64 { 'arm64' } default { "0x{0:X4}" -f $machineId } }
+          Write-Host "PE machine: $actual (atteso $env:VG_ARCH)"
+          if ($actual -ne $env:VG_ARCH) {
+            throw "il bundle è $actual ma questo job costruisce $env:VG_ARCH"
           }
 
       - name: Smoke test del bundle
@@ -192,7 +219,9 @@ jobs:
           }
 
       - name: Crea l'installer
-        run: powershell -ExecutionPolicy Bypass -File packaging/windows/build-installer.ps1
+        run: |
+          powershell -ExecutionPolicy Bypass -File packaging/windows/build-installer.ps1 `
+            -Arch $env:VG_ARCH
 
       - name: Firma l'installer
         env:
@@ -206,10 +235,24 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-installer
+          name: windows-installer-${{ env.VG_ARCH }}
           path: dist/*setup.exe
           if-no-files-found: error
           retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # Stessi step su un runner ARM. `windows-11-arm` è in anteprima pubblica:
+  # se un giorno non esiste più, il job fallisce ma continue-on-error impedisce
+  # che blocchi la release.
+  # ---------------------------------------------------------------------------
+  windows-arm64:
+    name: Windows (NSIS, arm64)
+    runs-on: windows-11-arm
+    continue-on-error: true
+    timeout-minutes: 45
+    env:
+      VG_ARCH: arm64
+    steps: *windows_steps
 
   # ===========================================================================
   macos-arm64:
@@ -279,77 +322,15 @@ jobs:
           retention-days: 14
 
   # ===========================================================================
-  macos-intel:
-    name: macOS (dmg, Intel)
-    # macos-13 è l'ultimo runner Intel gratuito e GitHub lo sta ritirando:
-    # se sparisce la build Intel viene saltata senza bloccare la release.
-    runs-on: macos-13
-    continue-on-error: true
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-          cache-dependency-path: requirements-build.txt
-
-      - name: Installa le dipendenze di build
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-build.txt
-
-      - name: Genera le icone native
-        run: python packaging/make_icons.py
-
-      - name: Build (PyInstaller)
-        run: |
-          set -o pipefail
-          if ! pyinstaller --noconfirm --clean --log-level INFO packaging/vgdl.spec 2>&1 | tee pyinstaller.log; then
-            echo "::group::ultime 150 righe del log"
-            tail -150 pyinstaller.log
-            echo "::endgroup::"
-            for warn in packaging/build/*/warn-*.txt; do
-              [ -e "$warn" ] || continue
-              echo "::group::$warn"
-              head -40 "$warn"
-              echo "::endgroup::"
-            done
-            exit 1
-          fi
-          test -d "dist/VG Resource Download.app"
-
-      - name: Smoke test del bundle
-        run: |
-          set -euo pipefail
-          "dist/VG Resource Download.app/Contents/MacOS/vgdl" --version
-
-      - name: Crea il DMG
-        env:
-          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
-          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
-          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
-          MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
-          MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
-          MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
-        run: bash packaging/macos/build-dmg.sh
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos-intel-dmg
-          path: dist/*.dmg
-          if-no-files-found: error
-          retention-days: 14
-
-  # ===========================================================================
-  # Release: solo sui tag v*, quando tutti e quattro i job sono passati.
+  # Release: solo sui tag v*, quando i job obbligatori sono passati.
   # ===========================================================================
   release:
     name: Pubblica la release
-    needs: [linux, windows, macos-arm64, macos-intel]
-    # Il job Intel è in continue-on-error, quindi non basta `needs` per
-    # bloccarlo: si chiede esplicitamente la riuscita degli altri tre.
+    needs: [linux, windows, windows-arm64, macos-arm64]
+    # windows-arm64 è sperimentale (runner in anteprima) e in continue-on-error:
+    # non basta `needs` per escluderlo, quindi si nominano solo i tre job
+    # obbligatori. Se l'arm64 è riuscito, i suoi file finiscono comunque nella
+    # release perché download-artifact li raccoglie tutti.
     if: |
       !cancelled() && startsWith(github.ref, 'refs/tags/v') &&
       needs.linux.result == 'success' &&
