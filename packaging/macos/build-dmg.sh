@@ -20,6 +20,10 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 
+# Con `set -e` lo script esce senza dire dove: questo trap rende il log della
+# CI leggibile invece di lasciare solo un exit code.
+trap 'rc=$?; printf "ERRORE: comando fallito alla riga %s (exit %s)\n" "$LINENO" "$rc" >&2' ERR
+
 APP_NAME="VG Resource Download"
 APP="$ROOT/dist/$APP_NAME.app"
 VOL_NAME="VG Resource Download"
@@ -135,8 +139,13 @@ if [ -n "${MACOS_CERT_P12:-}" ]; then
     security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
     security set-key-partition-list -S apple-tool:,apple: -k actions "$KEYCHAIN" >/dev/null
     rm -f "$RUNNER_TEMP/cert.p12"
+    # `head -n 1` chiude la pipe e con `pipefail` il comando risulterebbe
+    # fallito: `|| true` evita che set -e fermi tutto.
     MACOS_SIGN_IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" \
-        | sed -n 's/.*"\(.*\)"/\1/p' | head -n 1)"
+        | sed -n 's/.*"\(.*\)"/\1/p' | head -n 1 || true)"
+    if [ -z "$MACOS_SIGN_IDENTITY" ]; then
+        die "nessuna identità di firma nella keychain: controlla MACOS_CERT_P12"
+    fi
     export MACOS_SIGN_IDENTITY
 fi
 
@@ -184,15 +193,15 @@ hdiutil create \
     -ov -format UDZO -imagekey zlib-level=9 \
     "$OUT" >/dev/null
 
+[ -f "$OUT" ] || die "hdiutil non ha prodotto $OUT"
+say "    $(du -h "$OUT" | cut -f1 || echo '?')"
+
 # L'icona custom sta nella radice del volume: va riapplicata dopo la creazione.
-if [ -f "$ICNS" ]; then
-    MOUNT="$(hdiutil attach "$OUT" -nobrowse -readwrite | tail -1 | cut -f3)"
-    if [ -n "$MOUNT" ] && [ -d "$MOUNT" ]; then
-        cp "$ICNS" "$MOUNT/.VolumeIcon.icns" 2>/dev/null || true
-        SetFile -a C "$MOUNT" 2>/dev/null || true
-    fi
-    hdiutil detach "$MOUNT" -quiet 2>/dev/null || true
-fi
+# Nota: l'immagine è UDZO (compressa), quindi NON si può riaprire in lettura e
+# scrittura — `hdiutil attach -readwrite` fallisce, e con `pipefail` la command
+# substitution farebbe morire lo script dopo aver creato il DMG. Il flag
+# "icona custom" è già stato impostato sulla cartella sorgente più sopra, che
+# è la radice del volume: è lì che macOS lo legge.
 
 # Firma anche il DMG: Gatekeeper controlla la firma del contenitore prima di
 # montarlo, e notarytool accetta più facilmente un DMG già firmato.
@@ -201,4 +210,4 @@ sign_file "$OUT"
 notarize "$OUT"
 
 say ""
-say "Fatto: $OUT  ($(du -h "$OUT" | cut -f1))"
+say "Fatto: $OUT  ($(du -h "$OUT" | cut -f1 || echo '?'))"
