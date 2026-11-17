@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements dell'app quando è firmata con Developer ID e *hardened runtime*.
+
+  Il runtime indurito blocca di default:
+    - memoria eseguibile non firmata  → Python e la JIT di Tcl la usano
+    - caricamento di librerie con firma diversa
+                                       → il bundle PyInstaller carica .so
+                                         estratti da _internal/, non firmati
+                                         da Apple
+    - memoria scrivibile ed eseguibile → il driver Node di Playwright la usa
+
+  `com.apple.security.automation.apple-events` serve per aprire il Finder o
+  mostrare un file scaricato tramite AppleScript, se un giorno lo facciamo.
+
+  Gli stessi permessi vanno applicati al driver Node (entitlements-node.plist),
+  perché è un processo separato con la propria firma.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+</dict>
+</plist>

@@ -236,9 +236,72 @@ git push origin v1.0.0
 ```
 
 Gli artefatti della build (senza tag, quindi senza release) restano
-scaricabili dalla pagina della Action per 14 giorni. Senza i secret macOS la
-DMG esce firmata ad-hoc: funziona, ma al primo avvio serve *tasto destro →
-Apri*.
+scaricabili dalla pagina della Action per 14 giorni. Senza i secret di firma i
+pacchetti escono non firmati: funzionano, ma Windows mostra SmartScreen e
+macOS al primo avvio chiede *tasto destro → Apri*.
+
+## Firma dei pacchetti
+
+Ogni piattaforma ha il suo meccanismo; tutti sono **opzionali**, così fork e
+pull request compilano senza certificati.
+
+### Windows — Authenticode
+
+Firma gli eseguibili del bundle e, dopo, l'installer:
+
+```powershell
+powershell -File packaging\windows\sign.ps1 -Bundle dist\VGResourceDownload
+powershell -File packaging\windows\sign.ps1 -Path dist\VG_Resource_Download-1.0.0-x64-setup.exe
+```
+
+Serve `signtool.exe` (Windows SDK) e un certificato Code Signing, passabile in
+tre modi: `-PfxPath`/`-Password`, la variabile `WINDOWS_CERT_PFX_BASE64`
+(come fa la CI) o `-Thumbprint` per token/HSM. La firma include un timestamp
+RFC 3161: senza, al certificato scaduto Windows tornerebbe a lamentarsi.
+`-SkipIfUnsigned` fa uscire con 0 quando non c'è certificato.
+
+Segreti della CI: `WINDOWS_CERT_PFX_BASE64` (`base64 -w0 cert.pfx`) e
+`WINDOWS_CERT_PASSWORD`.
+
+### macOS — Developer ID + notarizzazione
+
+`packaging/macos/build-dmg.sh` firma i binari annidati con gli entitlements di
+`packaging/macos/entitlements.plist` (e `entitlements-node.plist` per il
+driver Node di Playwright), poi il bundle, poi il DMG. Infine invia a
+`notarytool` e fa lo `staple`.
+
+L'hardened runtime è obbligatorio per la notarizzazione e di default blocca
+proprio le cose che servono a Python e a V8 (memoria eseguibile non firmata,
+librerie non firmate da Apple): per questo gli entitlements concedono
+`allow-jit`, `allow-unsigned-executable-memory` e
+`disable-library-validation`.
+
+Senza certificato la firma è ad hoc (`codesign -s -`): l'app parte, ma il
+DMG scaricato resta in quarantena.
+
+Segreti della CI: `MACOS_CERT_P12` (`.p12` in base64), `MACOS_CERT_PASSWORD`,
+`MACOS_SIGN_IDENTITY` (opzionale, il nome esatto dell'identità),
+`MACOS_NOTARY_APPLE_ID`, `MACOS_NOTARY_PASSWORD` (una *app-specific
+password*) e `MACOS_NOTARY_TEAM_ID`.
+
+### Linux — GPG
+
+```bash
+GPG_PRIVATE_KEY="$(cat chiave-privata.asc)" bash packaging/linux/sign-appimage.sh
+```
+
+Crea `*.AppImage.asc` e `GPG-KEY.asc` accanto all'AppImage. Chi scarica
+verifica con:
+
+```bash
+gpg --import GPG-KEY.asc
+gpg --verify VG_Resource_Download-1.0.0-x86_64.AppImage.asc \
+              VG_Resource_Download-1.0.0-x86_64.AppImage
+```
+
+Segreti della CI: `GPG_PRIVATE_KEY` (chiave esportata con
+`gpg --armor --export-secret-keys`) e `GPG_PASSPHRASE` se la chiave è
+protetta. La release allega anche `SHA256SUMS.txt`.
 
 ## Note
 

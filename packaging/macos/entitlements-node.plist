@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements del driver Node di Playwright.
+
+  Node crea memoria eseguibile a runtime (JIT di V8): con l'hardened runtime
+  attivo, senza questi permessi il browser non parte e i download falliscono
+  con un errore di permessi che non dice nulla.
+
+  Vengono applicati solo al file `.../playwright/driver/node`, che è il nostro
+  processo figlio; il resto del bundle usa entitlements.plist.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+</dict>
+</plist>

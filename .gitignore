@@ -40,6 +40,9 @@ packaging/build/
 appimagetool*.AppImage
 *.AppDir/
 
+# Log delle build
+pyinstaller.log
+
 # ---------------------------------------------------------------------------
 # Sistema operativo / editor
 # ---------------------------------------------------------------------------

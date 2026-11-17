@@ -3,12 +3,16 @@
 # release con i file allegati.
 #
 #   Linux    → .AppImage        (ubuntu-22.04: glibc 2.35, gira ovunque)
-#   Windows  → setup .exe       (NSIS, x64)
-#   macOS    → .dmg             (arm64 + Intel)
+#   Windows  → setup .exe       (NSIS, x64, firmato Authenticode)
+#   macOS    → .dmg             (arm64 + Intel, firmato Developer ID)
 #
 # Il bundle lo fa PyInstaller (packaging/vgdl.spec); poi ogni sistema ha il suo
 # script di packaging in packaging/<sistema>/. I browser di Playwright NON
 # vengono inclusi: l'app usa il Chrome installato dall'utente.
+#
+# Firma: senza i segreti le build riescono comunque, ma i pacchetti escono non
+# firmati (macOS ripiega su una firma ad hoc). Vedi README → "Firma dei
+# pacchetti" per l'elenco dei segreti.
 # ---------------------------------------------------------------------------
 name: build
 
@@ -44,6 +48,7 @@ jobs:
     # dell'AppImage (qui 2.35), quindi resta compatibile con le distribuzioni
     # più vecchie.
     runs-on: ubuntu-22.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -66,7 +71,20 @@ jobs:
         run: python packaging/make_icons.py
 
       - name: Build (PyInstaller)
-        run: pyinstaller --noconfirm --clean packaging/vgdl.spec
+        run: |
+          set -o pipefail
+          if ! pyinstaller --noconfirm --clean --log-level INFO packaging/vgdl.spec 2>&1 | tee pyinstaller.log; then
+            echo "::group::ultime 150 righe del log"
+            tail -150 pyinstaller.log
+            echo "::endgroup::"
+            for warn in packaging/build/*/warn-*.txt; do
+              [ -e "$warn" ] || continue
+              echo "::group::$warn"
+              head -40 "$warn"
+              echo "::endgroup::"
+            done
+            exit 1
+          fi
 
       - name: Smoke test del bundle
         run: |
@@ -87,10 +105,18 @@ jobs:
           chmod +x "$APPIMAGE"
           "$APPIMAGE" --appimage-extract-and-run --version
 
+      - name: Firma l'AppImage (GPG)
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: bash packaging/linux/sign-appimage.sh
+
       - uses: actions/upload-artifact@v4
         with:
           name: linux-appimage
-          path: dist/*.AppImage
+          path: |
+            dist/*.AppImage
+            dist/*.AppImage.asc
           if-no-files-found: error
           retention-days: 14
 
@@ -98,6 +124,7 @@ jobs:
   windows:
     name: Windows (NSIS)
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -116,16 +143,42 @@ jobs:
         run: python packaging/make_icons.py
 
       - name: Build (PyInstaller)
-        run: pyinstaller --noconfirm --clean packaging/vgdl.spec
+        run: |
+          pyinstaller --noconfirm --clean --log-level INFO packaging/vgdl.spec 2>&1 |
+            Tee-Object -FilePath pyinstaller.log
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host '--- ultime 150 righe del log ---'
+            Get-Content pyinstaller.log -Tail 150
+            Get-ChildItem packaging\build -Recurse -Filter 'warn-*.txt' -ErrorAction SilentlyContinue |
+              ForEach-Object { Write-Host "--- $($_.Name) ---"; Get-Content $_.FullName -Head 40 }
+            exit 1
+          }
 
       - name: Smoke test del bundle
         run: |
-          dist\VGResourceDownload\vgdl.exe --version
+          $exe = 'dist\VGResourceDownload\vgdl.exe'
+          if (-not (Test-Path $exe)) { throw "manca $exe" }
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw "vgdl --version e uscito con $LASTEXITCODE" }
           if (-not (Test-Path 'dist\VGResourceDownload\VG Resource Download.exe')) {
-              throw 'manca l eseguibile GUI'
+            throw "manca l'eseguibile GUI"
           }
-          if (-not (Test-Path 'dist\VGResourceDownload\_internal\tkinter')) {
-              throw 'tkinter non incluso nel bundle'
+          # tkinter finisce nell'archivio PYZ: su disco resta solo l'estensione
+          # compilata (_tkinter*.pyd), piu' i dati Tcl/Tk in _internal\.
+          $tk = Get-ChildItem -Path 'dist\VGResourceDownload\_internal' -Recurse -Filter '_tkinter*.pyd'
+          if (-not $tk) { throw 'tkinter non incluso nel bundle' }
+          Write-Host "tkinter incluso: $($tk[0].Name)"
+
+      - name: Firma gli eseguibili (Authenticode)
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          if ($env:WINDOWS_CERT_PFX_BASE64) {
+            powershell -ExecutionPolicy Bypass -File packaging/windows/sign.ps1 `
+              -Bundle 'dist\VGResourceDownload'
+          } else {
+            Write-Host 'Nessun certificato: build non firmata.' -ForegroundColor Yellow
           }
 
       - name: Assicura NSIS
@@ -141,6 +194,16 @@ jobs:
       - name: Crea l'installer
         run: powershell -ExecutionPolicy Bypass -File packaging/windows/build-installer.ps1
 
+      - name: Firma l'installer
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          # -SkipIfUnsigned: senza certificato la build resta verde.
+          $installers = Get-ChildItem dist\*setup.exe | ForEach-Object { $_.FullName }
+          powershell -ExecutionPolicy Bypass -File packaging/windows/sign.ps1 `
+            -Path $installers -SkipIfUnsigned
+
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installer
@@ -152,6 +215,7 @@ jobs:
   macos-arm64:
     name: macOS (dmg, arm64)
     runs-on: macos-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -171,8 +235,24 @@ jobs:
 
       - name: Build (PyInstaller)
         run: |
-          pyinstaller --noconfirm --clean packaging/vgdl.spec
-          test -d "dist/VG Resource Download.app"
+          set -o pipefail
+          if ! pyinstaller --noconfirm --clean --log-level INFO packaging/vgdl.spec 2>&1 | tee pyinstaller.log; then
+            echo "::group::ultime 150 righe del log"
+            tail -150 pyinstaller.log
+            echo "::endgroup::"
+            for warn in packaging/build/*/warn-*.txt; do
+              [ -e "$warn" ] || continue
+              echo "::group::$warn"
+              head -40 "$warn"
+              echo "::endgroup::"
+            done
+            exit 1
+          fi
+          if [ ! -d "dist/VG Resource Download.app" ]; then
+            echo "il bundle .app non e stato creato; contenuto di dist/:"
+            ls -la dist
+            exit 1
+          fi
 
       - name: Smoke test del bundle
         run: |
@@ -185,6 +265,7 @@ jobs:
         env:
           MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
           MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
           MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
           MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
@@ -204,6 +285,7 @@ jobs:
     # se sparisce la build Intel viene saltata senza bloccare la release.
     runs-on: macos-13
     continue-on-error: true
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -223,7 +305,19 @@ jobs:
 
       - name: Build (PyInstaller)
         run: |
-          pyinstaller --noconfirm --clean packaging/vgdl.spec
+          set -o pipefail
+          if ! pyinstaller --noconfirm --clean --log-level INFO packaging/vgdl.spec 2>&1 | tee pyinstaller.log; then
+            echo "::group::ultime 150 righe del log"
+            tail -150 pyinstaller.log
+            echo "::endgroup::"
+            for warn in packaging/build/*/warn-*.txt; do
+              [ -e "$warn" ] || continue
+              echo "::group::$warn"
+              head -40 "$warn"
+              echo "::endgroup::"
+            done
+            exit 1
+          fi
           test -d "dist/VG Resource Download.app"
 
       - name: Smoke test del bundle
@@ -235,6 +329,7 @@ jobs:
         env:
           MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
           MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
           MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
           MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
@@ -277,8 +372,15 @@ jobs:
             [ -e "$f" ] || { echo "manca $f"; exit 1; }
           done
 
+      - name: Checksum SHA-256
+        run: |
+          set -euo pipefail
+          cd artifacts
+          sha256sum *.AppImage *.dmg *setup.exe > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
           generate_release_notes: true
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: false

@@ -40,17 +40,65 @@ esac
 OUT="$ROOT/dist/VG_Resource_Download-${VERSION}-${ARCH_LABEL}.dmg"
 
 # --- firma ------------------------------------------------------------------
+ENT_MAIN="$HERE/entitlements.plist"
+ENT_NODE="$HERE/entitlements-node.plist"
+
+# Firma i binari annidati prima del bundle: con l'hardened runtime ogni
+# eseguibile e ogni libreria devono avere una firma valida *prima* che il
+# bundle venga suggellato, se no macOS rifiuta l'avvio con "code signature
+# invalid" (e con --deep il risultato non è mai affidabile).
+sign_nested() {
+    local identity="$1"
+    local count=0
+
+    # Dal più profondo al più superficiale: firmare una directory non tocca i
+    # file che contiene, ma così codesign trova le librerie già firmate.
+    while IFS= read -r -d '' f; do
+        # Solo i Mach-O: ci sono anche .py, .txt, JSON e via dicendo.
+        file -b "$f" | grep -q 'Mach-O' || continue
+
+        local ents="$ENT_MAIN"
+        case "$f" in
+            */playwright/driver/node) ents="$ENT_NODE" ;;
+        esac
+
+        codesign --force --timestamp --options runtime \
+            --entitlements "$ents" --sign "$identity" "$f" 2>/dev/null \
+            || { say "   firma fallita: ${f#"$APP"/}"; return 1; }
+        count=$((count + 1))
+    # -depth: i figli prima dei padri, che è l'ordine che vuole codesign.
+    done < <(find "$APP/Contents" -depth -type f -perm -u+x -print0)
+
+    say "   firmati $count binari annidati"
+}
+
 sign_app() {
     local identity="${MACOS_SIGN_IDENTITY:--}"
 
-    # PyInstaller lascia dentro all'app decine di binari (.dylib, driver Node):
-    # con la firma ad hoc va bene --deep, con un certificato vero sarebbe
-    # meglio firmarli uno a uno, ma --deep qui regge.
-    say "==> Firma ($([ "$identity" = "-" ] && echo "ad hoc" || echo "$identity"))"
-    codesign --force --deep --timestamp=none --sign "$identity" \
-        --options runtime "$APP" 2>/dev/null \
-        || codesign --force --deep --sign "$identity" "$APP"
-    codesign --verify --deep --strict --verbose=2 "$APP" || say "avviso: verifica firma fallita"
+    if [ "$identity" = "-" ]; then
+        # Ad hoc: niente timestamp (non esiste un'autorità) e niente
+        # entitlements, che senza un Team ID non avrebbero senso.
+        say "==> Firma ad hoc"
+        codesign --force --deep --sign - "$APP" \
+            || die "firma ad hoc fallita"
+    else
+        say "==> Firma con $identity"
+        sign_nested "$identity" || die "firma dei binari annidati fallita"
+        codesign --force --timestamp --options runtime \
+            --entitlements "$ENT_MAIN" --sign "$identity" "$APP" \
+            || die "firma del bundle fallita"
+    fi
+
+    say "==> Verifica della firma"
+    codesign --verify --deep --strict --verbose=2 "$APP" \
+        || die "verifica della firma fallita"
+}
+
+sign_file() {
+    local identity="${MACOS_SIGN_IDENTITY:--}"
+    [ "$identity" = "-" ] && return 0
+    codesign --force --timestamp --sign "$identity" "$1" \
+        || say "avviso: firma di $1 fallita"
 }
 
 if [ -n "${MACOS_CERT_P12:-}" ]; then
@@ -123,6 +171,10 @@ if [ -f "$ICNS" ]; then
     fi
     hdiutil detach "$MOUNT" -quiet 2>/dev/null || true
 fi
+
+# Firma anche il DMG: Gatekeeper controlla la firma del contenitore prima di
+# montarlo, e notarytool accetta più facilmente un DMG già firmato.
+sign_file "$OUT"
 
 notarize "$OUT"
 
