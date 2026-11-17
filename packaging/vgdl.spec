@@ -199,7 +199,11 @@ collect = COLLECT(  # noqa: F821
 if IS_MAC:
     app = BUNDLE(  # noqa: F821
         collect,
-        name="VG Resource Download",  # PyInstaller aggiunge ".app"
+        # Il nome viene usato alla lettera: BUNDLE fa
+        # os.path.join(distpath, basename(name)) e *non* aggiunge ".app".
+        # Con "VG Resource Download" uscirebbe una cartella senza estensione,
+        # che il Finder non tratta come applicazione.
+        name="VG Resource Download.app",
         icon=str(ICONS / "app.icns"),
         bundle_identifier="com.blacksoulgem95.vg-resource-download",
         version=VERSION,

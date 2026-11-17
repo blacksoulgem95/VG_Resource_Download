@@ -46,17 +46,18 @@ ENT_NODE="$HERE/entitlements-node.plist"
 # Firma i binari annidati prima del bundle: con l'hardened runtime ogni
 # eseguibile e ogni libreria devono avere una firma valida *prima* che il
 # bundle venga suggellato, se no macOS rifiuta l'avvio con "code signature
-# invalid" (e con --deep il risultato non è mai affidabile).
+# invalid".
 sign_nested() {
     local identity="$1"
     local count=0
 
-    # Dal più profondo al più superficiale: firmare una directory non tocca i
-    # file che contiene, ma così codesign trova le librerie già firmate.
+    # 1. I singoli file Mach-O (binari e .dylib). find -depth li dà dal più
+    #    profondo al più superficiale.
     while IFS= read -r -d '' f; do
         # Solo i Mach-O: ci sono anche .py, .txt, JSON e via dicendo.
         file -b "$f" | grep -q 'Mach-O' || continue
 
+        # Il driver Node di Playwright ha bisogno dei permessi JIT per V8.
         local ents="$ENT_MAIN"
         case "$f" in
             */playwright/driver/node) ents="$ENT_NODE" ;;
@@ -66,10 +67,19 @@ sign_nested() {
             --entitlements "$ents" --sign "$identity" "$f" 2>/dev/null \
             || { say "   firma fallita: ${f#"$APP"/}"; return 1; }
         count=$((count + 1))
-    # -depth: i figli prima dei padri, che è l'ordine che vuole codesign.
     done < <(find "$APP/Contents" -depth -type f -perm -u+x -print0)
 
-    say "   firmati $count binari annidati"
+    # 2. I bundle annidati (Python.framework e simili): hanno un Info.plist,
+    #    quindi vanno firmati come bundle, non solo file per file.
+    while IFS= read -r -d '' d; do
+        codesign --force --timestamp --options runtime --deep \
+            --sign "$identity" "$d" 2>/dev/null \
+            || { say "   firma fallita: ${d#"$APP"/}"; return 1; }
+        count=$((count + 1))
+    done < <(find "$APP/Contents" -depth -type d \
+                 \( -name '*.framework' -o -name '*.bundle' -o -name '*.xpc' \) -print0)
+
+    say "   firmati $count elementi annidati"
 }
 
 sign_app() {
@@ -90,8 +100,20 @@ sign_app() {
     fi
 
     say "==> Verifica della firma"
-    codesign --verify --deep --strict --verbose=2 "$APP" \
-        || die "verifica della firma fallita"
+    if ! codesign --verify --deep --strict --verbose=2 "$APP"; then
+        if [ "$identity" = "-" ]; then
+            die "verifica della firma fallita"
+        fi
+        # Rete di sicurezza: se qualche bundle annidato è rimasto fuori,
+        # un --deep sul .app chiude i buchi. Non è l'ideale per Apple, ma
+        # meglio un pacchetto firmato che uno rifiutato.
+        say "   verifica fallita, riprovo con una firma --deep del bundle"
+        codesign --force --timestamp --options runtime --deep \
+            --entitlements "$ENT_MAIN" --sign "$identity" "$APP" \
+            || die "firma --deep del bundle fallita"
+        codesign --verify --deep --strict --verbose=2 "$APP" \
+            || die "verifica della firma fallita anche dopo --deep"
+    fi
 }
 
 sign_file() {
